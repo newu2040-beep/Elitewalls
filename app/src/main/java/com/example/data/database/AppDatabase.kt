@@ -7,10 +7,11 @@ import androidx.room.RoomDatabase
 import com.example.data.models.WallpaperItem
 import com.example.data.models.SoundItem
 import com.example.data.models.CollectionItem
+import com.example.data.models.SetupItem
 
 @Database(
-    entities = [WallpaperItem::class, SoundItem::class, CollectionItem::class],
-    version = 1,
+    entities = [WallpaperItem::class, SoundItem::class, CollectionItem::class, SetupItem::class],
+    version = 2,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {

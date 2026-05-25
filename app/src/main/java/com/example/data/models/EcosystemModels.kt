@@ -55,6 +55,19 @@ data class CollectionItem(
     val timestamp: Long = System.currentTimeMillis()
 )
 
+@Entity(tableName = "setup_items")
+data class SetupItem(
+    @PrimaryKey val id: String = UUID.randomUUID().toString(),
+    val title: String,
+    val description: String = "",
+    val imageUrl: String,
+    val author: String = "Rahul Shah",
+    val authorAvatar: String = "https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&q=80&w=120",
+    val deviceModel: String = "Unknown Device",
+    val likesCount: Int = 0,
+    val timestamp: Long = System.currentTimeMillis()
+)
+
 data class CreatorStats(
     val totalUploads: Int = 8,
     val totalDownloads: Int = 12400,

@@ -4,6 +4,7 @@ import androidx.room.*
 import com.example.data.models.WallpaperItem
 import com.example.data.models.SoundItem
 import com.example.data.models.CollectionItem
+import com.example.data.models.SetupItem
 import kotlinx.coroutines.flow.Flow
 
 @Dao
@@ -48,6 +49,19 @@ interface WallpaperDao {
 
     @Query("DELETE FROM user_collections")
     suspend fun deleteAllCollections()
+
+    @Query("DELETE FROM setup_items")
+    suspend fun deleteAllSetups()
+
+    // --- Setups API ---
+    @Query("SELECT * FROM setup_items ORDER BY timestamp DESC")
+    fun getAllSetups(): Flow<List<SetupItem>>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertSetup(setup: SetupItem)
+
+    @Delete
+    suspend fun deleteSetup(setup: SetupItem)
 
     // --- Sounds & Ringtones API ---
     @Query("SELECT * FROM sounds ORDER BY timestamp DESC")

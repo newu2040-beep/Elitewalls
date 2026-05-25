@@ -59,6 +59,7 @@ import coil.request.ImageRequest
 import com.example.data.models.CollectionItem
 import com.example.data.models.SoundItem
 import com.example.data.models.WallpaperItem
+import com.example.data.models.SetupItem
 import com.example.ui.viewmodel.AppThemeStyle
 import com.example.ui.viewmodel.EcosystemViewModel
 import com.example.ui.viewmodel.EditorSettings
@@ -226,6 +227,7 @@ fun MainDashboard(viewModel: EcosystemViewModel) {
         Triple("Home", Screen.HOME, Icons.Default.Home),
         Triple("Categories", Screen.CATEGORIES, Icons.Default.Category),
         Triple("Live Wallpapers", Screen.LIVE_WALLPAPERS, Icons.Default.MovieFilter),
+        Triple("Setups", Screen.SETUPS, Icons.Default.Devices),
         Triple("Sounds & Ringtones", Screen.SOUNDS, Icons.Default.MusicNote),
         Triple("Favorites", Screen.FAVORITES, Icons.Default.Favorite),
         Triple("Downloads", Screen.DOWNLOADS, Icons.Default.Download),
@@ -590,6 +592,7 @@ fun MainDashboard(viewModel: EcosystemViewModel) {
                         Screen.DETAIL -> DetailScreen(viewModel)
                         Screen.EDITOR -> EditorScreen(viewModel)
                         Screen.APPLY_PREVIEW -> ApplyPreviewScreen(viewModel)
+                        Screen.SETUPS -> SetupsScreen(viewModel)
                     }
                 }
             }
@@ -627,10 +630,17 @@ fun HomeScreen(viewModel: EcosystemViewModel, list: List<WallpaperItem>) {
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(bottom = 16.dp)
+                .glassmorphic(
+                    backgroundColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.2f),
+                    borderColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.3f),
+                    cornerRadius = 24.dp
+                )
                 .testTag("home_search_bar"),
-            colors = TextFieldDefaults.colors(
-                focusedContainerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.5f),
-                unfocusedContainerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.3f)
+            colors = OutlinedTextFieldDefaults.colors(
+                focusedContainerColor = Color.Transparent,
+                unfocusedContainerColor = Color.Transparent,
+                focusedBorderColor = Color.Transparent,
+                unfocusedBorderColor = Color.Transparent
             )
         )
 
@@ -832,60 +842,7 @@ fun HomeScreen(viewModel: EcosystemViewModel, list: List<WallpaperItem>) {
                 }
             }
 
-            // Featured Creator Spotlight
-            Card(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(vertical = 12.dp),
-                shape = RoundedCornerShape(24.dp),
-                colors = CardDefaults.cardColors(
-                    containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f)
-                )
-            ) {
-                Row(
-                    modifier = Modifier.padding(16.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .size(56.dp)
-                            .clip(CircleShape)
-                            .border(2.dp, MaterialTheme.colorScheme.primary, CircleShape)
-                    ) {
-                        AsyncImage(
-                            model = "https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&q=80&w=120",
-                            contentDescription = "Rahul Shah Creator Avatar",
-                            modifier = Modifier.fillMaxSize()
-                        )
-                    }
-                    Spacer(modifier = Modifier.width(16.dp))
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            text = "Featured Creator",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.primary
-                        )
-                        Text(
-                            text = "Rahul Shah",
-                            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
-                        )
-                        Text(
-                            text = "12.4K Downloads • Symmetrical compositions",
-                            style = MaterialTheme.typography.bodySmall
-                        )
-                    }
-                    Button(
-                        onClick = {
-                            viewModel.navigateTo(Screen.CREATOR_DASHBOARD)
-                            Toast.makeText(context, "Opened Rahul's Portal", Toast.LENGTH_SHORT).show()
-                        },
-                        shape = RoundedCornerShape(12.dp),
-                        colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
-                    ) {
-                        Text("View", fontSize = 12.sp)
-                    }
-                }
-            }
+
 
             Spacer(modifier = Modifier.height(12.dp))
 
@@ -1523,7 +1480,34 @@ fun SoundWaveformsIndicator() {
 
 // ==================== SECURE PRIVATE CRYPT VAULT ====================
 fun triggerNativeBiometricAuth(context: android.content.Context, onResult: (Boolean) -> Unit) {
-    onResult(false)
+    if (context is androidx.fragment.app.FragmentActivity) {
+        val executor = context.mainExecutor
+        val biometricPrompt = androidx.biometric.BiometricPrompt(context, executor,
+            object : androidx.biometric.BiometricPrompt.AuthenticationCallback() {
+                override fun onAuthenticationSucceeded(result: androidx.biometric.BiometricPrompt.AuthenticationResult) {
+                    super.onAuthenticationSucceeded(result)
+                    onResult(true)
+                }
+                override fun onAuthenticationError(errorCode: Int, errString: CharSequence) {
+                    super.onAuthenticationError(errorCode, errString)
+                    onResult(false)
+                }
+                override fun onAuthenticationFailed() {
+                    super.onAuthenticationFailed()
+                    onResult(false)
+                }
+            })
+        
+        val promptInfo = androidx.biometric.BiometricPrompt.PromptInfo.Builder()
+            .setTitle("Secure Vault Authorization")
+            .setSubtitle("Confirm biological credentials to access private wallpapers")
+            .setAllowedAuthenticators(androidx.biometric.BiometricManager.Authenticators.BIOMETRIC_STRONG or androidx.biometric.BiometricManager.Authenticators.DEVICE_CREDENTIAL)
+            .build()
+            
+        biometricPrompt.authenticate(promptInfo)
+    } else {
+        onResult(false)
+    }
 }
 
 @Composable
@@ -1537,6 +1521,18 @@ fun FavoritesScreen(viewModel: EcosystemViewModel, wallFav: List<WallpaperItem>,
     var setupStep by remember { mutableStateOf(0) } // 0: Enter Old, 1: Enter New, 2: Confirm New
     
     var screenState by remember { mutableStateOf(0) } // 0: Wallpapers, 1: Audios
+
+    val privateImageLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.GetContent()
+    ) { uri: Uri? ->
+        uri?.let {
+            val path = copyUriToInternalStorageWithExt(context, it, "jpg")
+            if (path != null) {
+                val isVideo = context.contentResolver.getType(it)?.startsWith("video") == true
+                viewModel.uploadPrivateVaultItem(path, isVideo)
+            }
+        }
+    }
 
     if (!isVaultUnlocked) {
         // --- POLISHED PIN / BIOMETRIC LOCK SCREEN OVERLAY ---
@@ -1819,47 +1815,59 @@ fun FavoritesScreen(viewModel: EcosystemViewModel, wallFav: List<WallpaperItem>,
 
             Spacer(modifier = Modifier.height(10.dp))
 
-            TabRow(selectedTabIndex = screenState, modifier = Modifier.padding(bottom = 16.dp)) {
-                Tab(selected = screenState == 0, onClick = { screenState = 0 }) {
-                    Text("Wallpapers (${wallFav.size})", modifier = Modifier.padding(12.dp))
-                }
-                Tab(selected = screenState == 1, onClick = { screenState = 1 }) {
-                    Text("Soundboards (${soundFav.size})", modifier = Modifier.padding(12.dp))
-                }
-            }
+            Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
+                Column(modifier = Modifier.fillMaxSize()) {
+                    TabRow(selectedTabIndex = screenState, modifier = Modifier.padding(bottom = 16.dp)) {
+                        Tab(selected = screenState == 0, onClick = { screenState = 0 }) {
+                            Text("Wallpapers (${wallFav.size})", modifier = Modifier.padding(12.dp))
+                        }
+                        Tab(selected = screenState == 1, onClick = { screenState = 1 }) {
+                            Text("Soundboards (${soundFav.size})", modifier = Modifier.padding(12.dp))
+                        }
+                    }
 
-            if (screenState == 0) {
-                if (wallFav.isEmpty()) {
-                    Box(modifier = Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
-                        Text("Your Private Vault is empty.\nLike elements on the dashboard to store them here securely.", textAlign = TextAlign.Center)
-                    }
-                } else {
-                    LazyVerticalGrid(
-                        columns = GridCells.Fixed(2),
-                        horizontalArrangement = Arrangement.spacedBy(16.dp),
-                        verticalArrangement = Arrangement.spacedBy(16.dp),
-                        modifier = Modifier.weight(1f)
-                    ) {
-                        items(wallFav) { item ->
-                            WallpaperCard(item = item, onClick = { viewModel.showWallpaperDetail(item) })
+                    if (screenState == 0) {
+                        if (wallFav.isEmpty()) {
+                            Box(modifier = Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
+                                Text("Your Private Vault is empty.\nLike elements on the dashboard to store them here securely.", textAlign = TextAlign.Center)
+                            }
+                        } else {
+                            LazyVerticalGrid(
+                                columns = GridCells.Fixed(2),
+                                horizontalArrangement = Arrangement.spacedBy(16.dp),
+                                verticalArrangement = Arrangement.spacedBy(16.dp),
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                items(wallFav) { item ->
+                                    WallpaperCard(item = item, onClick = { viewModel.showWallpaperDetail(item) })
+                                }
+                            }
+                        }
+                    } else {
+                        val favoritedSounds = soundFav.filter { it.isLiked || it.isBookmarked }
+                        if (favoritedSounds.isEmpty()) {
+                            Box(modifier = Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
+                                Text("No saved soundboards or custom ringtones in secure storage.", textAlign = TextAlign.Center)
+                            }
+                        } else {
+                            LazyColumn(
+                                verticalArrangement = Arrangement.spacedBy(12.dp),
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                items(favoritedSounds) { item ->
+                                    SoundsScreen(viewModel, listOf(item))
+                                }
+                            }
                         }
                     }
                 }
-            } else {
-                val favoritedSounds = soundFav.filter { it.isLiked || it.isBookmarked }
-                if (favoritedSounds.isEmpty()) {
-                    Box(modifier = Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
-                        Text("No saved soundboards or custom ringtones in secure storage.", textAlign = TextAlign.Center)
-                    }
-                } else {
-                    LazyColumn(
-                        verticalArrangement = Arrangement.spacedBy(12.dp),
-                        modifier = Modifier.weight(1f)
-                    ) {
-                        items(favoritedSounds) { item ->
-                            SoundsScreen(viewModel, listOf(item))
-                        }
-                    }
+                
+                FloatingActionButton(
+                    onClick = { privateImageLauncher.launch("*/*") },
+                    modifier = Modifier.align(Alignment.BottomEnd).padding(16.dp),
+                    containerColor = MaterialTheme.colorScheme.primary
+                ) {
+                    Icon(imageVector = Icons.Default.Add, contentDescription = "Add private file to Vault")
                 }
             }
         }
@@ -2114,6 +2122,13 @@ fun UploadCenterScreen(viewModel: EcosystemViewModel) {
                     Text("Ringtone/SFX", style = MaterialTheme.typography.labelMedium)
                 }
             }
+            Tab(selected = activeTab == 3, onClick = { activeTab = 3 }) {
+                Row(modifier = Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Icon(imageVector = Icons.Default.Devices, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text("Setup", style = MaterialTheme.typography.labelMedium)
+                }
+            }
         }
 
         // --- SUBMISSION CARD ---
@@ -2128,7 +2143,8 @@ fun UploadCenterScreen(viewModel: EcosystemViewModel) {
                     text = when (activeTab) {
                         0 -> "Publish Static Artworks"
                         1 -> "Publish Live Video Wallpapers"
-                        else -> "Publish Ringtones & Sound Effects"
+                        2 -> "Publish Ringtones & Sound Effects"
+                        else -> "Publish Home Screen Setup"
                     },
                     style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
                     modifier = Modifier.padding(bottom = 4.dp)
@@ -2142,7 +2158,7 @@ fun UploadCenterScreen(viewModel: EcosystemViewModel) {
 
                 // --- TAB CONTROLLER PICKER ACTIONS ---
                 when (activeTab) {
-                    0 -> { // IMAGE WALLPAPER
+                    0, 3 -> { // IMAGE WALLPAPER OR SETUP
                         Button(
                             onClick = { imageLauncher.launch("image/*") },
                             modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp),
@@ -2373,7 +2389,7 @@ fun UploadCenterScreen(viewModel: EcosystemViewModel) {
                     OutlinedTextField(
                         value = uploadTags,
                         onValueChange = { uploadTags = it },
-                        label = { Text("Tags (delimited by commas)") },
+                        label = { Text(if (activeTab == 3) "Device Model (e.g. Pixel 8 Pro)" else "Tags (delimited by commas)") },
                         modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp)
                     )
                 }
@@ -2449,6 +2465,25 @@ fun UploadCenterScreen(viewModel: EcosystemViewModel) {
                                     selectedAudioUri = null
                                     uploadTitle = ""
                                     viewModel.navigateTo(Screen.SOUNDS)
+                                }
+                            }
+                            3 -> { // SETUP
+                                if (selectedImageUri == null) {
+                                    Toast.makeText(context, "Please select a homescreen image first", Toast.LENGTH_SHORT).show()
+                                    return@Button
+                                }
+                                val path = copyUriToInternalStorageWithExt(context, selectedImageUri!!, "jpg")
+                                if (path != null) {
+                                    viewModel.uploadCustomSetup(
+                                        title = uploadTitle,
+                                        description = "Created by $uploadArtist",
+                                        imageUrl = path,
+                                        deviceModel = uploadTags.ifBlank { "Unknown Device" }
+                                    )
+                                    selectedImageUri = null
+                                    uploadTitle = ""
+                                    // Setups doesn't have a dedicated nav rail yet, we can navigate home
+                                    viewModel.navigateTo(Screen.HOME)
                                 }
                             }
                         }
@@ -3858,6 +3893,87 @@ fun ApplyPreviewScreen(viewModel: EcosystemViewModel) {
                             color = Color.White.copy(alpha = 0.7f),
                             style = MaterialTheme.typography.bodySmall
                         )
+                    }
+                }
+            }
+        }
+    }
+}
+
+// ==================== SETUPS SCREEN ====================
+@Composable
+fun SetupsScreen(viewModel: EcosystemViewModel) {
+    val setupsList by viewModel.allSetups.collectAsState()
+
+    Column(modifier = Modifier.fillMaxSize()) {
+        Text(
+            text = "Community Setups",
+            style = MaterialTheme.typography.displaySmall.copy(fontWeight = FontWeight.Bold),
+            modifier = Modifier.padding(16.dp)
+        )
+        Text(
+            text = "Discover inspiration for your home and lock screen layouts.",
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
+        )
+        
+        if (setupsList.isEmpty()) {
+            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Icon(imageVector = Icons.Default.Devices, contentDescription = null, modifier = Modifier.size(64.dp), tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.5f))
+                    Spacer(modifier = Modifier.height(16.dp))
+                    Text("No setups published yet.", style = MaterialTheme.typography.titleMedium)
+                    Text("Be the first to share your device setup!", color = Color.Gray, fontSize = 14.sp)
+                }
+            }
+        } else {
+            LazyVerticalGrid(
+                columns = GridCells.Adaptive(160.dp),
+                contentPadding = PaddingValues(16.dp),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                verticalArrangement = Arrangement.spacedBy(16.dp),
+                modifier = Modifier.fillMaxSize()
+            ) {
+                items(setupsList, key = { it.id }) { setup ->
+                    Card(
+                        modifier = Modifier.fillMaxWidth().aspectRatio(0.45f).clip(RoundedCornerShape(16.dp)),
+                        elevation = CardDefaults.cardElevation(4.dp)
+                    ) {
+                        Box(modifier = Modifier.fillMaxSize()) {
+                            AsyncImage(
+                                model = setup.imageUrl,
+                                contentDescription = setup.title,
+                                modifier = Modifier.fillMaxSize(),
+                                contentScale = ContentScale.Crop
+                            )
+                            // Gradient overlay
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .background(Brush.verticalGradient(listOf(Color.Transparent, Color.Black.copy(alpha = 0.8f))))
+                            )
+                            Column(
+                                modifier = Modifier.align(Alignment.BottomStart).padding(12.dp)
+                            ) {
+                                Text(setup.title, color = Color.White, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                Text(setup.deviceModel, color = Color.White.copy(alpha = 0.8f), fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                Spacer(modifier = Modifier.height(4.dp))
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Icon(Icons.Default.Person, contentDescription = null, tint = Color.White, modifier = Modifier.size(12.dp))
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text(setup.author, color = Color.White, fontSize = 10.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                }
+                            }
+                            
+                            // Delete
+                            IconButton(
+                                onClick = { viewModel.deleteSetupItem(setup) },
+                                modifier = Modifier.align(Alignment.TopEnd)
+                            ) {
+                                Icon(Icons.Default.Delete, contentDescription = "Delete Setup", tint = Color.Red.copy(alpha=0.7f))
+                            }
+                        }
                     }
                 }
             }

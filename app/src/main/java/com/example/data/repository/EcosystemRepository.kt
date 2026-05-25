@@ -5,6 +5,7 @@ import com.example.data.database.DatabaseSeeder
 import com.example.data.models.WallpaperItem
 import com.example.data.models.SoundItem
 import com.example.data.models.CollectionItem
+import com.example.data.models.SetupItem
 import com.example.data.models.CreatorStats
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
@@ -133,6 +134,17 @@ class EcosystemRepository(private val dao: WallpaperDao) {
 
     suspend fun deleteCollection(collection: CollectionItem) {
         dao.deleteCollection(collection)
+    }
+
+    // --- Setups ---
+    val allSetups: Flow<List<SetupItem>> = dao.getAllSetups()
+
+    suspend fun uploadSetup(setup: SetupItem) {
+        dao.insertSetup(setup)
+    }
+
+    suspend fun deleteSetup(setup: SetupItem) {
+        dao.deleteSetup(setup)
     }
 
     // --- Creator Analytics Flow ---

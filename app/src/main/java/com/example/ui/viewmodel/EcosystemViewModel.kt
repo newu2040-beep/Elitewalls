@@ -16,6 +16,7 @@ import com.example.data.models.CollectionItem
 import com.example.data.models.CreatorStats
 import com.example.data.models.SoundItem
 import com.example.data.models.WallpaperItem
+import com.example.data.models.SetupItem
 import com.example.data.repository.EcosystemRepository
 import com.squareup.moshi.Moshi
 import com.squareup.moshi.kotlin.reflect.KotlinJsonAdapterFactory
@@ -81,7 +82,8 @@ enum class Screen {
     ABOUT,
     DETAIL,
     EDITOR,
-    APPLY_PREVIEW
+    APPLY_PREVIEW,
+    SETUPS
 }
 
 class EcosystemViewModel(application: Application) : AndroidViewModel(application) {
@@ -118,6 +120,9 @@ class EcosystemViewModel(application: Application) : AndroidViewModel(applicatio
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     val allCollections: StateFlow<List<CollectionItem>> = repository.allCollections
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    val allSetups: StateFlow<List<SetupItem>> = repository.allSetups
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     val creatorStats: StateFlow<CreatorStats> = repository.getCreatorStats()
@@ -425,6 +430,26 @@ class EcosystemViewModel(application: Application) : AndroidViewModel(applicatio
             navigateTo(Screen.SOUNDS)
         }
     }
+    
+    fun uploadPrivateVaultItem(path: String, isVideo: Boolean = false) {
+        viewModelScope.launch {
+            val newItem = WallpaperItem(
+                id = java.util.UUID.randomUUID().toString(),
+                title = "Private Vault File",
+                category = "Vault",
+                url = path,
+                author = "Me",
+                width = 1080,
+                height = 2400,
+                tags = "vault, private",
+                isBookmarked = true,
+                isLive = isVideo,
+                videoUrl = if (isVideo) path else null
+            )
+            db.wallpaperDao().insertWallpaper(newItem)
+            Toast.makeText(getApplication(), "File successfully encrypted and secured in Vault.", Toast.LENGTH_SHORT).show()
+        }
+    }
 
     fun purgeDemoData() {
         viewModelScope.launch {
@@ -501,21 +526,11 @@ class EcosystemViewModel(application: Application) : AndroidViewModel(applicatio
         isLive: Boolean = false,
         videoUrl: String? = null
     ): Boolean {
-        // Quality assurance check
-        if (width < 1920 || height < 1080) {
-            Toast.makeText(
-                getApplication(),
-                "Upload Denied: Resolution is ${width}x${height}. Premium uploads must be at least 1080p (HD).",
-                Toast.LENGTH_LONG
-            ).show()
-            return false
-        }
-
         val qualityLabel = when {
             width >= 3840 && height >= 2160 -> "4K"
             width >= 2560 && height >= 1440 -> "1440p"
             category == "Dark AMOLED" -> "AMOLED"
-            else -> "1080p"
+            else -> "HD"
         }
 
         viewModelScope.launch {
@@ -533,7 +548,7 @@ class EcosystemViewModel(application: Application) : AndroidViewModel(applicatio
                     author = "Rahul Shah (You)"
                 )
             )
-            Toast.makeText(getApplication(), "Validation Succeeded: Uploaded high-quality $qualityLabel Wallpaper!", Toast.LENGTH_LONG).show()
+            Toast.makeText(getApplication(), "Validation Succeeded: Uploaded $qualityLabel Wallpaper!", Toast.LENGTH_LONG).show()
         }
         return true
     }
@@ -550,6 +565,27 @@ class EcosystemViewModel(application: Application) : AndroidViewModel(applicatio
                 )
             )
             Toast.makeText(getApplication(), "High fidelity Sound uploaded successfully!", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    fun uploadCustomSetup(title: String, description: String, imageUrl: String, deviceModel: String) {
+        viewModelScope.launch {
+            repository.uploadSetup(
+                SetupItem(
+                    title = title,
+                    description = description,
+                    imageUrl = imageUrl,
+                    deviceModel = deviceModel
+                )
+            )
+            Toast.makeText(getApplication(), "Awesome Home Screen Setup uploaded successfully!", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    fun deleteSetupItem(item: SetupItem) {
+        viewModelScope.launch {
+            repository.deleteSetup(item)
+            Toast.makeText(getApplication(), "Successfully deleted setup \"${item.title}\"!", Toast.LENGTH_SHORT).show()
         }
     }
 

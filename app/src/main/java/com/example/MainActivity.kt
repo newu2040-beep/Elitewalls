@@ -3,7 +3,7 @@ package com.example
 import android.Manifest
 import android.os.Build
 import android.os.Bundle
-import androidx.activity.ComponentActivity
+import androidx.fragment.app.FragmentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
@@ -14,7 +14,7 @@ import com.example.ui.screens.MainDashboard
 import com.example.ui.theme.ElitewallsTheme
 import com.example.ui.viewmodel.EcosystemViewModel
 
-class MainActivity : ComponentActivity() {
+class MainActivity : FragmentActivity() {
     
     private val viewModel: EcosystemViewModel by viewModels()
 
