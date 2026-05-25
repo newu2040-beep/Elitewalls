@@ -40,6 +40,15 @@ interface WallpaperDao {
     @Delete
     suspend fun deleteWallpaper(wallpaper: WallpaperItem)
 
+    @Query("DELETE FROM wallpapers")
+    suspend fun deleteAllWallpapers()
+
+    @Query("DELETE FROM sounds")
+    suspend fun deleteAllSounds()
+
+    @Query("DELETE FROM user_collections")
+    suspend fun deleteAllCollections()
+
     // --- Sounds & Ringtones API ---
     @Query("SELECT * FROM sounds ORDER BY timestamp DESC")
     fun getAllSounds(): Flow<List<SoundItem>>
@@ -58,6 +67,9 @@ interface WallpaperDao {
 
     @Update
     suspend fun updateSound(sound: SoundItem)
+
+    @Delete
+    suspend fun deleteSound(sound: SoundItem)
 
     // --- Collections API ---
     @Query("SELECT * FROM user_collections ORDER BY timestamp DESC")

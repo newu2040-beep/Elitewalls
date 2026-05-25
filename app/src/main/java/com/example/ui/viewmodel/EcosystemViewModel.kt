@@ -417,19 +417,24 @@ class EcosystemViewModel(application: Application) : AndroidViewModel(applicatio
         }
     }
 
+    fun deleteSoundItem(item: SoundItem) {
+        viewModelScope.launch {
+            db.wallpaperDao().deleteSound(item)
+            Toast.makeText(getApplication(), "Successfully deleted sound \"${item.title}\"!", Toast.LENGTH_SHORT).show()
+            selectedSound.value = null
+            navigateTo(Screen.SOUNDS)
+        }
+    }
+
     fun purgeDemoData() {
         viewModelScope.launch {
             val dao = db.wallpaperDao()
-            val wps = allWallpapers.value
-            var purgedCount = 0
-            for (wp in wps) {
-                if (wp.id.startsWith("wp_")) {
-                    dao.deleteWallpaper(wp)
-                    purgedCount++
-                }
-            }
-            Toast.makeText(getApplication(), "Purged $purgedCount pre-installed demo items. Starting with fresh manually added content!", Toast.LENGTH_LONG).show()
+            dao.deleteAllWallpapers()
+            dao.deleteAllSounds()
+            dao.deleteAllCollections()
+            Toast.makeText(getApplication(), "All preloaded wallpapers, sound ringtones and demo data have been completely deleted! Enjoy your clean slate.", Toast.LENGTH_LONG).show()
             selectedWallpaper.value = null
+            selectedSound.value = null
             navigateTo(Screen.HOME)
         }
     }
@@ -533,15 +538,15 @@ class EcosystemViewModel(application: Application) : AndroidViewModel(applicatio
         return true
     }
 
-    fun uploadCustomSound(title: String, category: String, durationText: String) {
+    fun uploadCustomSound(title: String, category: String, durationText: String, soundUrl: String = "local_sound_effect", artist: String = "Rahul Shah") {
         viewModelScope.launch {
             repository.uploadSound(
                 SoundItem(
                     title = title,
                     category = category,
                     durationText = durationText,
-                    soundUrl = "local_sound_effect",
-                    artist = "Rahul Shah"
+                    soundUrl = soundUrl,
+                    artist = artist
                 )
             )
             Toast.makeText(getApplication(), "High fidelity Sound uploaded successfully!", Toast.LENGTH_SHORT).show()

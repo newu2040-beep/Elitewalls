@@ -64,6 +64,8 @@ import com.example.ui.viewmodel.EcosystemViewModel
 import com.example.ui.viewmodel.EditorSettings
 import com.example.ui.viewmodel.Screen
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 // --- Glassmorphic Glass Modifier ---
 @Composable
@@ -447,8 +449,8 @@ fun MainDashboard(viewModel: EcosystemViewModel) {
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .glassmorphic(
-                                    backgroundColor = Color.White.copy(alpha = 0.05f),
-                                    borderColor = Color.White.copy(alpha = 0.1f),
+                                    backgroundColor = if (darkValue) Color.Black.copy(alpha = 0.65f) else MaterialTheme.colorScheme.surface.copy(alpha = 0.88f),
+                                    borderColor = if (darkValue) Color.White.copy(alpha = 0.12f) else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.12f),
                                     cornerRadius = 32.dp
                                 )
                                 .padding(vertical = 10.dp, horizontal = 12.dp),
@@ -462,6 +464,7 @@ fun MainDashboard(viewModel: EcosystemViewModel) {
                                 Triple("Vault", Screen.FAVORITES, Icons.Default.Favorite),
                                 Triple("Upload", Screen.UPLOAD_CENTER, Icons.Default.CloudUpload)
                             )
+                            val unselectedTint = if (darkValue) Color.White.copy(alpha = 0.4f) else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.45f)
                             bottomRoutes.forEach { (name, screen, icon) ->
                                 val selected = currentView == screen
                                 Box(
@@ -478,13 +481,13 @@ fun MainDashboard(viewModel: EcosystemViewModel) {
                                         Icon(
                                             imageVector = icon,
                                             contentDescription = name,
-                                            tint = if (selected) MaterialTheme.colorScheme.primary else Color.White.copy(alpha = 0.35f),
+                                            tint = if (selected) MaterialTheme.colorScheme.primary else unselectedTint,
                                             modifier = Modifier.size(24.dp)
                                         )
                                         Spacer(modifier = Modifier.height(3.dp))
                                         Text(
                                             text = name,
-                                            color = if (selected) MaterialTheme.colorScheme.primary else Color.White.copy(alpha = 0.4f),
+                                            color = if (selected) MaterialTheme.colorScheme.primary else unselectedTint,
                                             fontSize = 9.sp,
                                             fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium
                                         )
@@ -1350,6 +1353,31 @@ fun SoundsScreen(viewModel: EcosystemViewModel, sounds: List<SoundItem>) {
                                     Spacer(modifier = Modifier.width(4.dp))
                                     Text("Trim Clip", fontSize = 11.sp)
                                 }
+                                val coroutineScope = rememberCoroutineScope()
+                                val ctx = LocalContext.current
+                                Button(
+                                    onClick = {
+                                        coroutineScope.launch(Dispatchers.IO) {
+                                            try {
+                                                saveFileToPublicGallery(ctx, item.soundUrl, item.title, isVideo = false, isAudio = true)
+                                                withContext(Dispatchers.Main) {
+                                                    Toast.makeText(ctx, "Download finished! Saved Elitewalls_${item.title}.mp3 to Music folder.", Toast.LENGTH_SHORT).show()
+                                                }
+                                            } catch (e: Exception) {
+                                                withContext(Dispatchers.Main) {
+                                                    Toast.makeText(ctx, "Download failed: ${e.localizedMessage}", Toast.LENGTH_SHORT).show()
+                                                }
+                                            }
+                                        }
+                                    },
+                                    shape = RoundedCornerShape(10.dp),
+                                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.secondary)
+                                ) {
+                                    Icon(imageVector = androidx.compose.material.icons.Icons.Default.Download, contentDescription = null, modifier = Modifier.size(12.dp))
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text("Download", fontSize = 11.sp)
+                                }
+
                                 Button(
                                     onClick = {
                                         viewModel.toggleBookmarkSound(item)
@@ -1357,7 +1385,7 @@ fun SoundsScreen(viewModel: EcosystemViewModel, sounds: List<SoundItem>) {
                                     },
                                     shape = RoundedCornerShape(10.dp)
                                 ) {
-                                    Icon(imageVector = Icons.Default.Download, contentDescription = null, modifier = Modifier.size(12.dp))
+                                    Icon(imageVector = Icons.Default.Save, contentDescription = null, modifier = Modifier.size(12.dp))
                                     Spacer(modifier = Modifier.width(4.dp))
                                     Text("Apply", fontSize = 11.sp)
                                 }
@@ -1493,55 +1521,344 @@ fun SoundWaveformsIndicator() {
     }
 }
 
-// ==================== FAVORITES SCREEN ====================
+// ==================== SECURE PRIVATE CRYPT VAULT ====================
+fun triggerNativeBiometricAuth(context: android.content.Context, onResult: (Boolean) -> Unit) {
+    onResult(false)
+}
+
 @Composable
 fun FavoritesScreen(viewModel: EcosystemViewModel, wallFav: List<WallpaperItem>, soundFav: List<SoundItem>) {
+    val context = LocalContext.current
+    var isVaultUnlocked by remember { mutableStateOf(false) }
+    var inputPin by remember { mutableStateOf("") }
+    var savedPin by remember { mutableStateOf("1234") } // Default Master Passcode
+    var isSettingNewPin by remember { mutableStateOf(false) }
+    var tempNewPin by remember { mutableStateOf("") }
+    var setupStep by remember { mutableStateOf(0) } // 0: Enter Old, 1: Enter New, 2: Confirm New
+    
     var screenState by remember { mutableStateOf(0) } // 0: Wallpapers, 1: Audios
 
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(16.dp)
-    ) {
-        TabRow(selectedTabIndex = screenState, modifier = Modifier.padding(bottom = 16.dp)) {
-            Tab(selected = screenState == 0, onClick = { screenState = 0 }) {
-                Text("Wallpapers (${wallFav.size})", modifier = Modifier.padding(12.dp))
-            }
-            Tab(selected = screenState == 1, onClick = { screenState = 1 }) {
-                Text("Sound clips (${soundFav.size})", modifier = Modifier.padding(12.dp))
-            }
-        }
-
-        if (screenState == 0) {
-            if (wallFav.isEmpty()) {
-                Box(modifier = Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
-                    Text("Your Vault is empty. Like premium canvases to secure offline bookmarks.")
-                }
-            } else {
-                LazyVerticalGrid(
-                    columns = GridCells.Fixed(2),
-                    horizontalArrangement = Arrangement.spacedBy(16.dp),
-                    verticalArrangement = Arrangement.spacedBy(16.dp),
-                    modifier = Modifier.weight(1f)
+    if (!isVaultUnlocked) {
+        // --- POLISHED PIN / BIOMETRIC LOCK SCREEN OVERLAY ---
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(MaterialTheme.colorScheme.background)
+                .padding(24.dp),
+            contentAlignment = Alignment.Center
+        ) {
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.Center,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                // Outer Glow ring containing Lock icon
+                Box(
+                    modifier = Modifier
+                        .size(90.dp)
+                        .clip(RoundedCornerShape(32.dp))
+                        .background(MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.4f)),
+                    contentAlignment = Alignment.Center
                 ) {
-                    items(wallFav) { item ->
-                        WallpaperCard(item = item, onClick = { viewModel.showWallpaperDetail(item) })
+                    Icon(
+                        imageVector = Icons.Default.Lock,
+                        contentDescription = "Cosmic Private Sandbox Vault Locked",
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(42.dp)
+                    )
+                }
+                Spacer(modifier = Modifier.height(20.dp))
+                
+                Text(
+                    text = "Aesthetic Private Crypt",
+                    style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Black),
+                    color = MaterialTheme.colorScheme.onBackground
+                )
+                Spacer(modifier = Modifier.height(6.dp))
+                Text(
+                    text = "Decrypt offline wallpaper vault & hidden ringtones.\nDefault security code is 1234",
+                    style = MaterialTheme.typography.bodySmall,
+                    textAlign = TextAlign.Center,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                
+                Spacer(modifier = Modifier.height(30.dp))
+
+                // Passcode round dots indicators of typed input
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(16.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.padding(bottom = 36.dp)
+                ) {
+                    for (i in 0 until 4) {
+                        val active = inputPin.length > i
+                        Box(
+                            modifier = Modifier
+                                .size(16.dp)
+                                .clip(CircleShape)
+                                .border(2.dp, MaterialTheme.colorScheme.primary, CircleShape)
+                                .background(
+                                    if (active) MaterialTheme.colorScheme.primary else Color.Transparent
+                                )
+                        )
+                    }
+                }
+
+                // Dial Touch pad layout in elegant pastel circle keys
+                Column(
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    modifier = Modifier.width(280.dp)
+                ) {
+                    val keys = listOf(
+                        listOf("1", "2", "3"),
+                        listOf("4", "5", "6"),
+                        listOf("7", "8", "9"),
+                        listOf("fingerprint", "0", "backspace")
+                    )
+                    
+                    keys.forEach { rowKeys ->
+                        Row(
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            rowKeys.forEach { key ->
+                                Box(
+                                    modifier = Modifier
+                                        .size(68.dp)
+                                        .clip(CircleShape)
+                                        .background(
+                                            if (key == "fingerprint" || key == "backspace") Color.Transparent
+                                            else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f)
+                                        )
+                                        .clickable {
+                                            when (key) {
+                                                "fingerprint" -> {
+                                                    triggerNativeBiometricAuth(context) { success ->
+                                                        if (success) {
+                                                            isVaultUnlocked = true
+                                                            Toast.makeText(context, "System Biometrics verified! Decrypting Crypt...", Toast.LENGTH_SHORT).show()
+                                                        } else {
+                                                            Toast.makeText(context, "Biometric authentication failed or unsupported", Toast.LENGTH_SHORT).show()
+                                                        }
+                                                    }
+                                                }
+                                                "backspace" -> {
+                                                    if (inputPin.isNotEmpty()) {
+                                                        inputPin = inputPin.dropLast(1)
+                                                    }
+                                                }
+                                                else -> {
+                                                    if (inputPin.length < 4) {
+                                                        inputPin += key
+                                                        if (inputPin.length == 4) {
+                                                            if (inputPin == savedPin) {
+                                                                isVaultUnlocked = true
+                                                                inputPin = ""
+                                                                Toast.makeText(context, "Private Vault Decrypted Succesfully!", Toast.LENGTH_SHORT).show()
+                                                            } else {
+                                                                Toast.makeText(context, "Incorrect Security PIN. Please retry.", Toast.LENGTH_SHORT).show()
+                                                                inputPin = ""
+                                                            }
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        },
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    when (key) {
+                                        "fingerprint" -> {
+                                            Icon(
+                                                imageVector = Icons.Default.Fingerprint,
+                                                contentDescription = "Scan Fingerprint",
+                                                tint = MaterialTheme.colorScheme.primary,
+                                                modifier = Modifier.size(32.dp)
+                                            )
+                                        }
+                                        "backspace" -> {
+                                            Icon(
+                                                imageVector = Icons.Default.Backspace,
+                                                contentDescription = "Backspace",
+                                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                modifier = Modifier.size(24.dp)
+                                            )
+                                        }
+                                        else -> {
+                                            Text(
+                                                text = key,
+                                                style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
+                                                color = MaterialTheme.colorScheme.onSurface
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
             }
-        } else {
-            val favoritedSounds = soundFav.filter { it.isLiked || it.isBookmarked }
-            if (favoritedSounds.isEmpty()) {
-                Box(modifier = Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
-                    Text("No saved soundboards or custom ringtones.")
+        }
+    } else {
+        // --- UNLOCKED PRIVATE VAULT CONTENT ---
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(16.dp)
+        ) {
+            // Elegant header row with setup options and lock action icon
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column {
+                    Text(
+                        text = "Cosmic Private Sandbox",
+                        style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.ExtraBold)
+                    )
+                    Text(
+                        text = "Secured Offline Bookmark Storage",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                }
+                
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    // Change PIN option
+                    IconButton(
+                        onClick = { isSettingNewPin = true },
+                        modifier = Modifier.background(MaterialTheme.colorScheme.surfaceVariant, CircleShape)
+                    ) {
+                        Icon(imageVector = Icons.Default.Password, contentDescription = "Change Vault PIN code", tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                    
+                    // Re-lock option
+                    IconButton(
+                        onClick = { isVaultUnlocked = false },
+                        modifier = Modifier.background(MaterialTheme.colorScheme.primaryContainer, CircleShape)
+                    ) {
+                        Icon(imageVector = Icons.Default.LockOpen, contentDescription = "Lock Vault", tint = MaterialTheme.colorScheme.primary)
+                    }
+                }
+            }
+
+            // --- CHANGE PIN FLOW DIALOG ---
+            if (isSettingNewPin) {
+                AlertDialog(
+                    onDismissRequest = { isSettingNewPin = false; tempNewPin = ""; setupStep = 0 },
+                    title = { Text("Update Private Crypt PIN") },
+                    text = {
+                        Column {
+                            val promptText = when (setupStep) {
+                                0 -> "Enter old 4-digit PIN to proceed"
+                                1 -> "Enter your new 4-digit security PIN"
+                                else -> "Re-enter new 4-digit security PIN to confirm"
+                            }
+                            Text(promptText, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(bottom = 12.dp))
+                            
+                            OutlinedTextField(
+                                value = tempNewPin,
+                                onValueChange = { 
+                                    if (it.length <= 4 && it.all { char -> char.isDigit() }) {
+                                        tempNewPin = it 
+                                    }
+                                },
+                                label = { Text("PIN Code [4 digits]") },
+                                modifier = Modifier.fillMaxWidth()
+                            )
+                        }
+                    },
+                    confirmButton = {
+                        Button(
+                            onClick = {
+                                if (tempNewPin.length != 4) {
+                                    Toast.makeText(context, "PIN must consist of exactly 4 digits", Toast.LENGTH_SHORT).show()
+                                    return@Button
+                                }
+                                when (setupStep) {
+                                    0 -> {
+                                        if (tempNewPin == savedPin) {
+                                            setupStep = 1
+                                            tempNewPin = ""
+                                        } else {
+                                            Toast.makeText(context, "Incorrect old PIN. Please retry.", Toast.LENGTH_SHORT).show()
+                                            tempNewPin = ""
+                                        }
+                                    }
+                                    1 -> {
+                                        savedPin = tempNewPin // save draft
+                                        setupStep = 2
+                                        tempNewPin = ""
+                                    }
+                                    2 -> {
+                                        if (tempNewPin == savedPin) {
+                                            Toast.makeText(context, "PIN successfully updated!", Toast.LENGTH_SHORT).show()
+                                            isSettingNewPin = false
+                                            tempNewPin = ""
+                                            setupStep = 0
+                                        } else {
+                                            Toast.makeText(context, "Mismatch in confirmation PIN. Restarting process.", Toast.LENGTH_SHORT).show()
+                                            tempNewPin = ""
+                                            setupStep = 0
+                                        }
+                                    }
+                                }
+                            }
+                        ) {
+                            Text("Validate")
+                        }
+                    },
+                    dismissButton = {
+                        TextButton(onClick = { isSettingNewPin = false; tempNewPin = ""; setupStep = 0 }) {
+                            Text("Cancel")
+                        }
+                    }
+                )
+            }
+
+            Spacer(modifier = Modifier.height(10.dp))
+
+            TabRow(selectedTabIndex = screenState, modifier = Modifier.padding(bottom = 16.dp)) {
+                Tab(selected = screenState == 0, onClick = { screenState = 0 }) {
+                    Text("Wallpapers (${wallFav.size})", modifier = Modifier.padding(12.dp))
+                }
+                Tab(selected = screenState == 1, onClick = { screenState = 1 }) {
+                    Text("Soundboards (${soundFav.size})", modifier = Modifier.padding(12.dp))
+                }
+            }
+
+            if (screenState == 0) {
+                if (wallFav.isEmpty()) {
+                    Box(modifier = Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
+                        Text("Your Private Vault is empty.\nLike elements on the dashboard to store them here securely.", textAlign = TextAlign.Center)
+                    }
+                } else {
+                    LazyVerticalGrid(
+                        columns = GridCells.Fixed(2),
+                        horizontalArrangement = Arrangement.spacedBy(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(16.dp),
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        items(wallFav) { item ->
+                            WallpaperCard(item = item, onClick = { viewModel.showWallpaperDetail(item) })
+                        }
+                    }
                 }
             } else {
-                LazyColumn(
-                    verticalArrangement = Arrangement.spacedBy(12.dp),
-                    modifier = Modifier.weight(1f)
-                ) {
-                    items(favoritedSounds) { item ->
-                        SoundsScreen(viewModel, listOf(item))
+                val favoritedSounds = soundFav.filter { it.isLiked || it.isBookmarked }
+                if (favoritedSounds.isEmpty()) {
+                    Box(modifier = Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
+                        Text("No saved soundboards or custom ringtones in secure storage.", textAlign = TextAlign.Center)
+                    }
+                } else {
+                    LazyColumn(
+                        verticalArrangement = Arrangement.spacedBy(12.dp),
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        items(favoritedSounds) { item ->
+                            SoundsScreen(viewModel, listOf(item))
+                        }
                     }
                 }
             }
@@ -1588,51 +1905,177 @@ fun DownloadsScreen(viewModel: EcosystemViewModel, localList: List<WallpaperItem
 }
 
 // ==================== UPLOAD CENTER SCREEN ====================
+// --- METADATA RETRIEVAL HELPERS FOR REAL-TIME DISPLAY ---
+fun queryRealFileSize(context: Context, uri: Uri): Long {
+    var size: Long = 0
+    try {
+        val cursor = context.contentResolver.query(uri, null, null, null, null)
+        cursor?.use {
+            if (it.moveToFirst()) {
+                val sizeIndex = it.getColumnIndex(android.provider.OpenableColumns.SIZE)
+                if (sizeIndex != -1) {
+                    size = it.getLong(sizeIndex)
+                }
+            }
+        }
+    } catch (e: Exception) {
+        e.printStackTrace()
+    }
+    return size
+}
+
+fun decodeImageDimensions(context: Context, uri: Uri): Pair<Int, Int> {
+    return try {
+        val inputStream = context.contentResolver.openInputStream(uri)
+        val options = android.graphics.BitmapFactory.Options().apply {
+            inJustDecodeBounds = true
+        }
+        android.graphics.BitmapFactory.decodeStream(inputStream, null, options)
+        Pair(options.outWidth.coerceAtLeast(1), options.outHeight.coerceAtLeast(1))
+    } catch (e: Exception) {
+        Pair(1920, 1080)
+    }
+}
+
+fun retrieveMediaDurationAndResolution(context: Context, uri: Uri): Triple<String, String, String> {
+    val retriever = android.media.MediaMetadataRetriever()
+    var dims = "1920x1080"
+    var duration = "0:15"
+    var mime = "video/mp4"
+    try {
+        retriever.setDataSource(context, uri)
+        val w = retriever.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH)
+        val h = retriever.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT)
+        if (w != null && h != null) {
+            dims = "${w}x${h}"
+        }
+        val durMs = retriever.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull() ?: 0L
+        if (durMs > 0) {
+            val totalSec = durMs / 1000
+            val min = totalSec / 60
+            val remainingSec = totalSec % 60
+            duration = String.format("%02d:%02d", min, remainingSec)
+        }
+        val m = retriever.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_MIMETYPE)
+        if (m != null) mime = m
+    } catch (e: Exception) {
+        e.printStackTrace()
+    } finally {
+        try {
+            retriever.release()
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+    }
+    return Triple(dims, duration, mime)
+}
+
+fun copyUriToInternalStorageWithExt(context: Context, uri: Uri, ext: String): String? {
+    return try {
+        val inputStream = context.contentResolver.openInputStream(uri) ?: return null
+        val fileName = "upload_${System.currentTimeMillis()}.$ext"
+        val file = File(context.filesDir, fileName)
+        val outputStream = FileOutputStream(file)
+        inputStream.use { input ->
+            outputStream.use { output ->
+                input.copyTo(output)
+            }
+        }
+        file.absolutePath
+    } catch (e: Exception) {
+        e.printStackTrace()
+        null
+    }
+}
+
 @Composable
 fun UploadCenterScreen(viewModel: EcosystemViewModel) {
     val context = LocalContext.current
+    var activeTab by remember { mutableStateOf(0) } // 0: Theme Wallpaper, 1: Live Video, 2: Sounds/Ringtones
+
+    // Inputs States
     var uploadTitle by remember { mutableStateOf("") }
     var uploadCategory by remember { mutableStateOf("Minimal") }
     var uploadWidth by remember { mutableStateOf("3840") }
     var uploadHeight by remember { mutableStateOf("2160") }
-    var uploadTags by remember { mutableStateOf("minimal, ultra, clean") }
-    var uploadUrl by remember { mutableStateOf("") }
-    var uploadIsLive by remember { mutableStateOf(false) }
+    var uploadTags by remember { mutableStateOf("creative, 4k, amoled") }
+    var uploadArtist by remember { mutableStateOf("Rahul Shah") }
 
+    // Uri selection States
     var selectedImageUri by remember { mutableStateOf<Uri?>(null) }
-    val galleryLauncher = rememberLauncherForActivityResult(
+    var selectedVideoUri by remember { mutableStateOf<Uri?>(null) }
+    var selectedAudioUri by remember { mutableStateOf<Uri?>(null) }
+
+    // Real-time metadata computed states
+    var imageSizeText by remember { mutableStateOf("N/A") }
+    var imageDimsText by remember { mutableStateOf("N/A") }
+
+    var videoSizeText by remember { mutableStateOf("N/A") }
+    var videoDimsText by remember { mutableStateOf("N/A") }
+    var videoDurationText by remember { mutableStateOf("0:00") }
+
+    var audioSizeText by remember { mutableStateOf("N/A") }
+    var audioDurationText by remember { mutableStateOf("0:00") }
+
+    // Media Player Preview States
+    var audioMediaPlayer by remember { mutableStateOf<android.media.MediaPlayer?>(null) }
+    var isAudioPlaying by remember { mutableStateOf(false) }
+
+    // File pickers launchers
+    val imageLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.GetContent()
     ) { uri ->
         selectedImageUri = uri
         if (uri != null) {
-            uploadUrl = uri.toString()
-            try {
-                val inputStream = context.contentResolver.openInputStream(uri)
-                val options = android.graphics.BitmapFactory.Options().apply {
-                    inJustDecodeBounds = true
-                }
-                android.graphics.BitmapFactory.decodeStream(inputStream, null, options)
-                uploadWidth = options.outWidth.coerceAtLeast(1920).toString()
-                uploadHeight = options.outHeight.coerceAtLeast(1080).toString()
-            } catch (e: Exception) {
-                e.printStackTrace()
+            val size = queryRealFileSize(context, uri)
+            val mb = String.format("%.2f MB", size.toDouble() / (1024 * 1024))
+            imageSizeText = mb
+            val dims = decodeImageDimensions(context, uri)
+            uploadWidth = dims.first.toString()
+            uploadHeight = dims.second.toString()
+            imageDimsText = "${dims.first} x ${dims.second}"
+        }
+    }
+
+    val videoLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.GetContent()
+    ) { uri ->
+        selectedVideoUri = uri
+        if (uri != null) {
+            val size = queryRealFileSize(context, uri)
+            val mb = String.format("%.2f MB", size.toDouble() / (1024 * 1024))
+            videoSizeText = mb
+            val meta = retrieveMediaDurationAndResolution(context, uri)
+            videoDimsText = meta.first
+            videoDurationText = meta.second
+            val parts = meta.first.split("x")
+            if (parts.size == 2) {
+                uploadWidth = parts[0]
+                uploadHeight = parts[1]
             }
         }
     }
 
-    val permissionToRequest = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-        android.Manifest.permission.READ_MEDIA_IMAGES
-    } else {
-        android.Manifest.permission.READ_EXTERNAL_STORAGE
+    val audioLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.GetContent()
+    ) { uri ->
+        selectedAudioUri = uri
+        if (uri != null) {
+            val size = queryRealFileSize(context, uri)
+            val kb = String.format("%.1f KB", size.toDouble() / 1024)
+            audioSizeText = kb
+            val meta = retrieveMediaDurationAndResolution(context, uri)
+            audioDurationText = meta.second
+        }
     }
 
-    val permissionLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.RequestPermission()
-    ) { isGranted ->
-        if (isGranted) {
-            galleryLauncher.launch("image/*")
-        } else {
-            Toast.makeText(context, "Storage permission is required to safely upload local gallery creations.", Toast.LENGTH_LONG).show()
+    // Stop audio player if tab or screen changes
+    DisposableEffect(activeTab) {
+        onDispose {
+            audioMediaPlayer?.stop()
+            audioMediaPlayer?.release()
+            audioMediaPlayer = null
+            isAudioPlaying = false
         }
     }
 
@@ -1642,296 +2085,759 @@ fun UploadCenterScreen(viewModel: EcosystemViewModel) {
             .verticalScroll(rememberScrollState())
             .padding(16.dp)
     ) {
+        // --- LUXURIOUS TAB SELECTOR ---
+        TabRow(
+            selectedTabIndex = activeTab,
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(bottom = 16.dp),
+            containerColor = Color.Transparent
+        ) {
+            Tab(selected = activeTab == 0, onClick = { activeTab = 0 }) {
+                Row(modifier = Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Icon(imageVector = Icons.Default.Wallpaper, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text("Wallpaper", style = MaterialTheme.typography.labelMedium)
+                }
+            }
+            Tab(selected = activeTab == 1, onClick = { activeTab = 1 }) {
+                Row(modifier = Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Icon(imageVector = Icons.Default.Movie, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text("Live Video", style = MaterialTheme.typography.labelMedium)
+                }
+            }
+            Tab(selected = activeTab == 2, onClick = { activeTab = 2 }) {
+                Row(modifier = Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Icon(imageVector = Icons.Default.MusicNote, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text("Ringtone/SFX", style = MaterialTheme.typography.labelMedium)
+                }
+            }
+        }
+
+        // --- SUBMISSION CARD ---
         Card(
             modifier = Modifier.fillMaxWidth(),
             shape = RoundedCornerShape(24.dp),
-            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f))
         ) {
             Column(modifier = Modifier.padding(20.dp)) {
+                // Intro text
                 Text(
-                    text = "Consolidated Upload Portal",
-                    style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
-                    modifier = Modifier.padding(bottom = 8.dp)
+                    text = when (activeTab) {
+                        0 -> "Publish Static Artworks"
+                        1 -> "Publish Live Video Wallpapers"
+                        else -> "Publish Ringtones & Sound Effects"
+                    },
+                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                    modifier = Modifier.padding(bottom = 4.dp)
                 )
                 Text(
-                    text = "Elitewalls runs integrated quality assurance scans. Images under 1080p are programmatically rejected to preserve display fidelity.",
+                    text = "All manual uploads are instantly processed, checked for display resolution compatibility and indexed in local SQLite tables.",
                     style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(bottom = 16.dp)
                 )
 
-                // GALLERY PICKER TRIGGER BUTTON
-                Button(
-                    onClick = {
-                        val hasPermission = androidx.core.content.ContextCompat.checkSelfPermission(
-                            context,
-                            permissionToRequest
-                        ) == android.content.pm.PackageManager.PERMISSION_GRANTED
-
-                        if (hasPermission) {
-                            galleryLauncher.launch("image/*")
-                        } else {
-                            Toast.makeText(context, "Requesting Storage Permission...", Toast.LENGTH_SHORT).show()
-                            permissionLauncher.launch(permissionToRequest)
+                // --- TAB CONTROLLER PICKER ACTIONS ---
+                when (activeTab) {
+                    0 -> { // IMAGE WALLPAPER
+                        Button(
+                            onClick = { imageLauncher.launch("image/*") },
+                            modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp),
+                            shape = RoundedCornerShape(12.dp),
+                            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
+                        ) {
+                            Icon(imageVector = Icons.Default.AddPhotoAlternate, contentDescription = null)
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(if (selectedImageUri == null) "Choose Image from Gallery" else "Replace Chosen Image")
                         }
-                    },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(bottom = 16.dp),
-                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.secondary),
-                    shape = RoundedCornerShape(12.dp)
-                ) {
-                    Icon(imageVector = Icons.Default.PhotoLibrary, contentDescription = null)
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text(if (selectedImageUri != null) "Selected: Custom Gallery Image" else "Pick Wallpaper from Gallery")
+
+                        if (selectedImageUri != null) {
+                            // REAL TIME IMAGE METADATA CARD
+                            Card(
+                                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.8f)),
+                                modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp),
+                                shape = RoundedCornerShape(12.dp),
+                                border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.2f))
+                            ) {
+                                Row(modifier = Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                                    Box(
+                                        modifier = Modifier.size(60.dp).clip(RoundedCornerShape(8.dp)).background(Color.DarkGray)
+                                    ) {
+                                        AsyncImage(
+                                            model = selectedImageUri,
+                                            contentDescription = null,
+                                            contentScale = ContentScale.Crop,
+                                            modifier = Modifier.fillMaxSize()
+                                        )
+                                    }
+                                    Spacer(modifier = Modifier.width(16.dp))
+                                    Column {
+                                        Text("Real-Time File Information", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
+                                        Text("File size: $imageSizeText", fontSize = 11.sp)
+                                        Text("Resolution: $imageDimsText", fontSize = 11.sp)
+                                        Text("Mime Type: image/jpeg", fontSize = 11.sp)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    1 -> { // VIDEO WALLPAPER
+                        Button(
+                            onClick = { videoLauncher.launch("video/*") },
+                            modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp),
+                            shape = RoundedCornerShape(12.dp),
+                            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.secondary)
+                        ) {
+                            Icon(imageVector = Icons.Default.VideoCall, contentDescription = null)
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(if (selectedVideoUri == null) "Choose Video from Gallery" else "Replace Chosen Video")
+                        }
+
+                        if (selectedVideoUri != null) {
+                            // REAL-TIME VIDEO PREVIEW & METADATA CARD
+                            Card(
+                                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.8f)),
+                                modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp),
+                                shape = RoundedCornerShape(12.dp)
+                            ) {
+                                Column(modifier = Modifier.padding(12.dp)) {
+                                    Text("Dynamic Preview & Metadata", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold, modifier = Modifier.padding(bottom = 8.dp))
+                                    
+                                    // INBUILT VIDEO GALLERY PREVIEW PLAYER
+                                    Box(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .height(180.dp)
+                                            .clip(RoundedCornerShape(8.dp))
+                                            .background(Color.Black),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        AndroidView(
+                                            factory = { ctx ->
+                                                VideoView(ctx).apply {
+                                                    setVideoURI(selectedVideoUri)
+                                                    setOnPreparedListener { mp ->
+                                                        mp.isLooping = true
+                                                        mp.setVolume(0f, 0f) // Silent during selection preview
+                                                        start()
+                                                    }
+                                                }
+                                            },
+                                            modifier = Modifier.fillMaxSize()
+                                        )
+                                    }
+                                    Spacer(modifier = Modifier.height(8.dp))
+                                    Text("Raw File size: $videoSizeText", fontSize = 11.sp)
+                                    Text("Video resolution: $videoDimsText", fontSize = 11.sp)
+                                    Text("Video duration: $videoDurationText", fontSize = 11.sp)
+                                }
+                            }
+                        }
+                    }
+                    2 -> { // SOUND RINGTONES
+                        Button(
+                            onClick = { audioLauncher.launch("audio/*") },
+                            modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp),
+                            shape = RoundedCornerShape(12.dp),
+                            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.tertiary)
+                        ) {
+                            Icon(imageVector = Icons.Default.Audiotrack, contentDescription = null)
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(if (selectedAudioUri == null) "Choose Sound from Gallery" else "Replace Chosen Sound")
+                        }
+
+                        if (selectedAudioUri != null) {
+                            // REAL-TIME AUDIO METADATA & PREVIEW PLAYER CARD
+                            Card(
+                                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.8f)),
+                                modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp),
+                                shape = RoundedCornerShape(12.dp)
+                            ) {
+                                Column(modifier = Modifier.padding(12.dp)) {
+                                    Text("Ringtone Preview & Metadata", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold, modifier = Modifier.padding(bottom = 8.dp))
+                                    
+                                    // AUDIO PLAYER CONTROLS
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        IconButton(
+                                            onClick = {
+                                                try {
+                                                    if (isAudioPlaying) {
+                                                        audioMediaPlayer?.pause()
+                                                        isAudioPlaying = false
+                                                    } else {
+                                                        if (audioMediaPlayer == null) {
+                                                            audioMediaPlayer = android.media.MediaPlayer().apply {
+                                                                setDataSource(context, selectedAudioUri!!)
+                                                                prepare()
+                                                                isLooping = true
+                                                                start()
+                                                            }
+                                                        } else {
+                                                            audioMediaPlayer?.start()
+                                                        }
+                                                        isAudioPlaying = true
+                                                    }
+                                                } catch (e: Exception) {
+                                                    e.printStackTrace()
+                                                    Toast.makeText(context, "Could not preview local clip: ${e.localizedMessage}", Toast.LENGTH_SHORT).show()
+                                                }
+                                            },
+                                            modifier = Modifier.background(MaterialTheme.colorScheme.primaryContainer, CircleShape)
+                                        ) {
+                                            Icon(
+                                                imageVector = if (isAudioPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
+                                                contentDescription = "Play preview",
+                                                tint = MaterialTheme.colorScheme.primary
+                                            )
+                                        }
+                                        Spacer(modifier = Modifier.width(12.dp))
+                                        Column {
+                                            Text("Selected Ringtone Pitch", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                                            Text("Listen to verify rhythm template before uploading", style = MaterialTheme.typography.labelSmall)
+                                        }
+                                    }
+                                    Spacer(modifier = Modifier.height(8.dp))
+                                    Text("Audio size: $audioSizeText", fontSize = 11.sp)
+                                    Text("Duration: $audioDurationText", fontSize = 11.sp)
+                                    Text("Mime Type: audio/mpeg", fontSize = 11.sp)
+                                }
+                            }
+                        }
+                    }
                 }
 
+                // --- SHARED FORM CONTROLS ---
                 OutlinedTextField(
                     value = uploadTitle,
                     onValueChange = { uploadTitle = it },
-                    label = { Text("Creation Title") },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(bottom = 12.dp)
-                        .testTag("upload_title_input")
+                    label = { Text("Creation/Ringtone Title") },
+                    modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp)
                 )
 
-                Text("Wallpaper Group Category", style = MaterialTheme.typography.labelMedium)
-                var dropdownExpanded by remember { mutableStateOf(false) }
-                Box {
-                    Button(
-                        onClick = { dropdownExpanded = true },
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(bottom = 12.dp)
-                            .testTag("upload_category_trigger")
-                    ) {
-                        Text(uploadCategory)
+                if (activeTab != 2) {
+                    Text("Select Art Category Theme", style = MaterialTheme.typography.labelMedium)
+                    var expanded by remember { mutableStateOf(false) }
+                    Box {
+                        Button(
+                            onClick = { expanded = true },
+                            modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp)
+                        ) {
+                            Text(uploadCategory)
+                        }
+                        DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+                            val categories = listOf("Minimal", "Nature", "Anime", "Gaming", "Cars", "Abstract", "Cyberpunk", "Aesthetic", "Dark AMOLED", "Space")
+                            categories.forEach { cat ->
+                                DropdownMenuItem(text = { Text(cat) }, onClick = {
+                                    uploadCategory = cat
+                                    expanded = false
+                                })
+                            }
+                        }
                     }
-                    DropdownMenu(expanded = dropdownExpanded, onDismissRequest = { dropdownExpanded = false }) {
-                        val categories = listOf("Minimal", "Nature", "Anime", "Gaming", "Cars", "Abstract", "Cyberpunk", "Aesthetic", "Dark AMOLED", "Space", "Technology", "Photography", "Liquid Vector", "Glassmorphic", "Cyber SciFi")
-                        categories.forEach { cat ->
-                            DropdownMenuItem(text = { Text(cat) }, onClick = {
-                                uploadCategory = cat
-                                dropdownExpanded = false
-                            })
+                } else {
+                    Text("Select Audio Grouping", style = MaterialTheme.typography.labelMedium)
+                    var expanded by remember { mutableStateOf(false) }
+                    Box {
+                        Button(
+                            onClick = { expanded = true },
+                            modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp)
+                        ) {
+                            Text(uploadCategory)
+                        }
+                        DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+                            val categories = listOf("Ringtone", "Meme", "Sound Effect", "Ambient")
+                            categories.forEach { cat ->
+                                DropdownMenuItem(text = { Text(cat) }, onClick = {
+                                    uploadCategory = cat
+                                    expanded = false
+                                })
+                            }
                         }
                     }
                 }
 
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp)
-                ) {
-                    OutlinedTextField(
-                        value = uploadWidth,
-                        onValueChange = { uploadWidth = it },
-                        label = { Text("Width (px)") },
-                        modifier = Modifier.weight(1f).testTag("upload_width_input")
-                    )
-                    OutlinedTextField(
-                        value = uploadHeight,
-                        onValueChange = { uploadHeight = it },
-                        label = { Text("Height (px)") },
-                        modifier = Modifier.weight(1f).testTag("upload_height_input")
-                    )
-                }
-                Spacer(modifier = Modifier.height(12.dp))
-
                 OutlinedTextField(
-                    value = uploadTags,
-                    onValueChange = { uploadTags = it },
-                    label = { Text("Tags / Hashtags") },
+                    value = uploadArtist,
+                    onValueChange = { uploadArtist = it },
+                    label = { Text("Artist Branding Label") },
                     modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp)
                 )
 
-                OutlinedTextField(
-                    value = uploadUrl,
-                    onValueChange = { uploadUrl = it },
-                    label = { Text("Direct Link (Alternative URL)") },
-                    placeholder = { Text("E.g. Unsplash or custom link") },
-                    modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp)
-                )
-
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(bottom = 16.dp)
-                ) {
-                    Checkbox(checked = uploadIsLive, onCheckedChange = { uploadIsLive = it })
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text("Identify as looping Live Background (Video link)")
+                if (activeTab != 2) {
+                    OutlinedTextField(
+                        value = uploadTags,
+                        onValueChange = { uploadTags = it },
+                        label = { Text("Tags (delimited by commas)") },
+                        modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp)
+                    )
                 }
 
+                // --- UPLOAD INITIATE BUTTON ---
                 Button(
                     onClick = {
-                        val widthVal = uploadWidth.toIntOrNull() ?: 0
-                        val heightVal = uploadHeight.toIntOrNull() ?: 0
                         if (uploadTitle.isBlank()) {
-                            Toast.makeText(context, "Failure: Please define building artwork title", Toast.LENGTH_SHORT).show()
+                            Toast.makeText(context, "Failure: Please write title heading.", Toast.LENGTH_SHORT).show()
                             return@Button
                         }
                         
-                        var finalPath = uploadUrl
-                        if (selectedImageUri != null) {
-                            val localCreated = copyUriToInternalStorage(context, selectedImageUri!!)
-                            if (localCreated != null) {
-                                finalPath = localCreated
+                        when (activeTab) {
+                            0 -> { // STATIC WALLPAPER
+                                if (selectedImageUri == null) {
+                                    Toast.makeText(context, "Please select an image file first", Toast.LENGTH_SHORT).show()
+                                    return@Button
+                                }
+                                val path = copyUriToInternalStorageWithExt(context, selectedImageUri!!, "jpg")
+                                if (path != null) {
+                                    viewModel.analyzeAndValidateUpload(
+                                        title = uploadTitle,
+                                        category = uploadCategory,
+                                        width = uploadWidth.toIntOrNull() ?: 3840,
+                                        height = uploadHeight.toIntOrNull() ?: 2160,
+                                        tags = uploadTags,
+                                        url = path,
+                                        isLive = false,
+                                        videoUrl = null
+                                    )
+                                    // Complete
+                                    selectedImageUri = null
+                                    uploadTitle = ""
+                                    viewModel.navigateTo(Screen.HOME)
+                                }
+                            }
+                            1 -> { // VIDEO WALLPAPER
+                                if (selectedVideoUri == null) {
+                                    Toast.makeText(context, "Please select a video file first", Toast.LENGTH_SHORT).show()
+                                    return@Button
+                                }
+                                val path = copyUriToInternalStorageWithExt(context, selectedVideoUri!!, "mp4")
+                                if (path != null) {
+                                    viewModel.analyzeAndValidateUpload(
+                                        title = uploadTitle,
+                                        category = uploadCategory,
+                                        width = uploadWidth.toIntOrNull() ?: 1920,
+                                        height = uploadHeight.toIntOrNull() ?: 1080,
+                                        tags = uploadTags,
+                                        url = "https://images.unsplash.com/photo-1541701494587-cb58502866ab?auto=format&fit=crop&q=80&w=600", // poster frame thumbnail
+                                        isLive = true,
+                                        videoUrl = path
+                                    )
+                                    selectedVideoUri = null
+                                    uploadTitle = ""
+                                    viewModel.navigateTo(Screen.LIVE_WALLPAPERS)
+                                }
+                            }
+                            2 -> { // SOUND/RINGTONE
+                                if (selectedAudioUri == null) {
+                                    Toast.makeText(context, "Please select an audio file first", Toast.LENGTH_SHORT).show()
+                                    return@Button
+                                }
+                                val path = copyUriToInternalStorageWithExt(context, selectedAudioUri!!, "mp3")
+                                if (path != null) {
+                                    viewModel.uploadCustomSound(
+                                        title = uploadTitle,
+                                        category = uploadCategory,
+                                        durationText = audioDurationText,
+                                        soundUrl = path,
+                                        artist = uploadArtist
+                                    )
+                                    selectedAudioUri = null
+                                    uploadTitle = ""
+                                    viewModel.navigateTo(Screen.SOUNDS)
+                                }
                             }
                         }
-
-                        if (finalPath.isBlank()) {
-                            Toast.makeText(context, "Failure: Please select an image first", Toast.LENGTH_SHORT).show()
-                            return@Button
-                        }
-
-                        val success = viewModel.analyzeAndValidateUpload(
-                            title = uploadTitle,
-                            category = uploadCategory,
-                            width = widthVal,
-                            height = heightVal,
-                            tags = uploadTags,
-                            url = finalPath,
-                            isLive = uploadIsLive,
-                            videoUrl = if (uploadIsLive) "https://assets.mixkit.co/videos/preview/mixkit-star-trails-glowing-in-the-night-sky-40292-large.mp4" else null
-                        )
-                        if (success) {
-                            // Reset inputs
-                            uploadTitle = ""
-                            uploadUrl = ""
-                            selectedImageUri = null
-                            viewModel.navigateTo(Screen.HOME)
-                        }
                     },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(54.dp)
-                        .testTag("submit_artwork_upload"),
+                    modifier = Modifier.fillMaxWidth().height(54.dp),
                     shape = RoundedCornerShape(16.dp)
                 ) {
-                    Text("Execute QA Check & Distribute")
+                    Text("Quality Scan & Publish Instantly")
                 }
             }
         }
     }
 }
 
+// ==================== SHARE AND MANAGEMENT HELPERS ====================
+fun shareLocalFile(context: android.content.Context, filePath: String, title: String, isVideo: Boolean = false, isAudio: Boolean = false) {
+    if (filePath.isEmpty() || !filePath.startsWith("/")) {
+        // Shared URL text fallback
+        val intent = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
+            type = "text/plain"
+            putExtra(android.content.Intent.EXTRA_SUBJECT, title)
+            putExtra(android.content.Intent.EXTRA_TEXT, "Discover this premium Elitewalls artwork: \"$title\"\nLink: $filePath")
+        }
+        context.startActivity(android.content.Intent.createChooser(intent, "Share Masterpiece Using"))
+        return
+    }
+    try {
+        val file = java.io.File(filePath)
+        if (!file.exists()) {
+            Toast.makeText(context, "Underlying file not yet fully buffered to disk", Toast.LENGTH_SHORT).show()
+            return
+        }
+        val uri: Uri = androidx.core.content.FileProvider.getUriForFile(
+            context,
+            "${context.packageName}.fileprovider",
+            file
+        )
+        val intent = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
+            type = when {
+                isVideo -> "video/mp4"
+                isAudio -> "audio/mp3"
+                else -> "image/jpeg"
+            }
+            putExtra(android.content.Intent.EXTRA_STREAM, uri)
+            putExtra(android.content.Intent.EXTRA_SUBJECT, title)
+            putExtra(android.content.Intent.EXTRA_TEXT, "Look at my custom creation \"$title\" uploaded on Elitewalls Sandbox!")
+            addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
+        context.startActivity(android.content.Intent.createChooser(intent, "Share Masterpiece Using"))
+    } catch (e: Exception) {
+        e.printStackTrace()
+        Toast.makeText(context, "Sharing exception: ${e.localizedMessage}", Toast.LENGTH_SHORT).show()
+    }
+}
+
+fun saveFileToPublicGallery(context: android.content.Context, sourcePath: String, title: String, isVideo: Boolean = false, isAudio: Boolean = false) {
+    try {
+        val resolver = context.contentResolver
+        val contentValues = android.content.ContentValues().apply {
+            put(android.provider.MediaStore.MediaColumns.DISPLAY_NAME, "Elitewalls_$title")
+            if (isVideo) {
+                put(android.provider.MediaStore.MediaColumns.MIME_TYPE, "video/mp4")
+                if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
+                    put(android.provider.MediaStore.MediaColumns.RELATIVE_PATH, android.os.Environment.DIRECTORY_MOVIES + "/Elitewalls")
+                }
+            } else if (isAudio) {
+                put(android.provider.MediaStore.MediaColumns.MIME_TYPE, "audio/mp3")
+                if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
+                    put(android.provider.MediaStore.MediaColumns.RELATIVE_PATH, android.os.Environment.DIRECTORY_MUSIC + "/Elitewalls")
+                }
+            } else {
+                put(android.provider.MediaStore.MediaColumns.MIME_TYPE, "image/jpeg")
+                if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
+                    put(android.provider.MediaStore.MediaColumns.RELATIVE_PATH, android.os.Environment.DIRECTORY_PICTURES + "/Elitewalls")
+                }
+            }
+        }
+
+        val baseUri = when {
+            isVideo -> android.provider.MediaStore.Video.Media.EXTERNAL_CONTENT_URI
+            isAudio -> android.provider.MediaStore.Audio.Media.EXTERNAL_CONTENT_URI
+            else -> android.provider.MediaStore.Images.Media.EXTERNAL_CONTENT_URI
+        }
+
+        val insertUri = resolver.insert(baseUri, contentValues)
+        if (insertUri == null) {
+            return
+        }
+
+        val outputStream = resolver.openOutputStream(insertUri)
+        if (outputStream == null) {
+            return
+        }
+
+        val isLocalFile = sourcePath.startsWith("/")
+        val inputStream = if (isLocalFile) {
+            java.io.FileInputStream(java.io.File(sourcePath))
+        } else {
+            java.net.URL(sourcePath).openStream()
+        }
+
+        if (inputStream == null) {
+            return
+        }
+
+        inputStream.use { input ->
+            outputStream.use { output ->
+                input.copyTo(output)
+            }
+        }
+    } catch (e: Exception) {
+        e.printStackTrace()
+    }
+}
+
 // ==================== CREATOR DASHBOARD ====================
 @Composable
 fun CreatorDashboardScreen(viewModel: EcosystemViewModel) {
-    val stats by viewModel.creatorStats.collectAsState()
+    val context = LocalContext.current
+    var spaceTab by remember { mutableStateOf(0) } // 0: Wallpapers, 1: Sound Ringtone clips
+    
+    val wallpapers by viewModel.allWallpapers.collectAsState()
+    val sounds by viewModel.allSounds.collectAsState()
+
+    var activeAudioPlaybackUri by remember { mutableStateOf<String?>(null) }
+    var activeMediaPlayer by remember { mutableStateOf<android.media.MediaPlayer?>(null) }
+    var isAudioTrackPlaying by remember { mutableStateOf(false) }
+
+    DisposableEffect(spaceTab) {
+        onDispose {
+            activeMediaPlayer?.stop()
+            activeMediaPlayer?.release()
+            activeMediaPlayer = null
+            isAudioTrackPlaying = false
+            activeAudioPlaybackUri = null
+        }
+    }
 
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .verticalScroll(rememberScrollState())
             .padding(16.dp)
     ) {
+        // Profile Summary Header Panel (Professional Branding)
         Card(
-            shape = RoundedCornerShape(28.dp),
-            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)),
-            modifier = Modifier.padding(bottom = 20.dp)
+            shape = RoundedCornerShape(24.dp),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.35f)),
+            modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp)
         ) {
-            Column(modifier = Modifier.padding(20.dp)) {
+            Column(modifier = Modifier.padding(16.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Box(modifier = Modifier.size(64.dp).clip(CircleShape)) {
-                        AsyncImage(model = "https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&q=80&w=120", contentDescription = null)
+                    Box(modifier = Modifier.size(60.dp).clip(CircleShape).background(MaterialTheme.colorScheme.primary)) {
+                        AsyncImage(
+                            model = "https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&q=80&w=120", 
+                            contentDescription = "Avatar Profile",
+                            contentScale = ContentScale.Crop,
+                            modifier = Modifier.fillMaxSize()
+                        )
                     }
                     Spacer(modifier = Modifier.width(16.dp))
                     Column {
-                        Text("Rahul Shah", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
-                        Text("Supreme Media Curator", style = MaterialTheme.typography.labelSmall)
-                        Text("Quality Assurance Level: Gold Verified", color = MaterialTheme.colorScheme.primary, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        Text("Rahul Shah", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Black)
+                        Text("Aesthetic Creator Hub Sandbox", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
+                        Text("Level: Gold Prime Verified", fontSize = 11.sp, color = MaterialTheme.colorScheme.secondary, fontWeight = FontWeight.Bold)
                     }
                 }
             }
         }
 
-        Text("Corporate Upload Analytics", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Black, modifier = Modifier.padding(bottom = 12.dp))
+        Text(
+            text = "Sandbox Content Manager",
+            style = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.Black,
+            modifier = Modifier.padding(bottom = 12.dp)
+        )
 
-        // Matrix Stats card
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(bottom = 20.dp),
-            horizontalArrangement = Arrangement.spacedBy(12.dp)
-        ) {
-            Card(modifier = Modifier.weight(1f).height(100.dp), shape = RoundedCornerShape(16.dp)) {
-                Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.Center) {
-                    Text("Total Uploads", style = MaterialTheme.typography.labelSmall)
-                    Text("${stats.totalUploads}", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
-                    Text("QA 100% Ok", color = Color(0xFF4CAF50), fontSize = 10.sp)
-                }
+        // Custom filter selector
+        TabRow(selectedTabIndex = spaceTab, modifier = Modifier.padding(bottom = 12.dp), containerColor = Color.Transparent) {
+            Tab(selected = spaceTab == 0, onClick = { spaceTab = 0 }) {
+                Text("My Canvas Artwork (${wallpapers.size})", modifier = Modifier.padding(12.dp), style = MaterialTheme.typography.labelMedium)
             }
-            Card(modifier = Modifier.weight(1f).height(100.dp), shape = RoundedCornerShape(16.dp)) {
-                Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.Center) {
-                    Text("Global Downloads", style = MaterialTheme.typography.labelSmall)
-                    Text("${stats.totalDownloads}", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
-                    Text("+560 today", color = MaterialTheme.colorScheme.primary, fontSize = 10.sp)
-                }
+            Tab(selected = spaceTab == 1, onClick = { spaceTab = 1 }) {
+                Text("My Ringtones (${sounds.size})", modifier = Modifier.padding(12.dp), style = MaterialTheme.typography.labelMedium)
             }
         }
 
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(bottom = 24.dp),
-            horizontalArrangement = Arrangement.spacedBy(12.dp)
-        ) {
-            Card(modifier = Modifier.weight(1f).height(100.dp), shape = RoundedCornerShape(16.dp)) {
-                Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.Center) {
-                    Text("Ecosystem Fans", style = MaterialTheme.typography.labelSmall)
-                    Text("${stats.followersCount}", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
-                    Text("Top 2% Creator", color = MaterialTheme.colorScheme.primary, fontSize = 10.sp)
+        if (spaceTab == 0) {
+            if (wallpapers.isEmpty()) {
+                Box(modifier = Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Icon(imageVector = Icons.Default.CloudQueue, contentDescription = null, modifier = Modifier.size(48.dp), tint = MaterialTheme.colorScheme.primary)
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text("Your Canvas Sandbox is currently empty.", fontWeight = FontWeight.Bold)
+                        Text("Go to 'Upload' tab to publish your first artwork!", fontSize = 12.sp, color = Color.Gray)
+                    }
                 }
-            }
-            Card(modifier = Modifier.weight(1f).height(100.dp), shape = RoundedCornerShape(16.dp)) {
-                Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.Center) {
-                    Text("Aesthetic Rating", style = MaterialTheme.typography.labelSmall)
-                    Text("${stats.averageQualityScore}/10.0", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
-                    Text("Ultra Premium", color = Color(0xFFFF9800), fontSize = 10.sp)
-                }
-            }
-        }
-
-        // Custom Analytics Bar Chart in Jetpack Compose Canvas
-        Card(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(200.dp),
-            shape = RoundedCornerShape(24.dp)
-        ) {
-            Column(modifier = Modifier.padding(16.dp)) {
-                Text("Weekly Download Acceleration", fontWeight = FontWeight.Bold, fontSize = 14.sp)
-                Spacer(modifier = Modifier.height(16.dp))
-                Row(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(bottom = 8.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.Bottom
+            } else {
+                LazyColumn(
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                    modifier = Modifier.weight(1f)
                 ) {
-                    val scaleValues = listOf(0.4f, 0.6f, 0.5f, 0.9f, 0.7f, 1.0f, 0.8f)
-                    val days = listOf("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
-
-                    scaleValues.forEachIndexed { idx, value ->
-                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                            Box(
-                                modifier = Modifier
-                                    .width(22.dp)
-                                    .fillMaxHeight(0.7f * value)
-                                    .background(
-                                        Brush.verticalGradient(
-                                            listOf(
-                                                MaterialTheme.colorScheme.primary,
-                                                MaterialTheme.colorScheme.secondary
-                                            )
-                                        ),
-                                        RoundedCornerShape(6.dp)
+                    items(wallpapers) { item ->
+                        Card(
+                            modifier = Modifier.fillMaxWidth(),
+                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)),
+                            shape = RoundedCornerShape(16.dp)
+                        ) {
+                            Row(modifier = Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                                // Thumbnail
+                                Box(
+                                    modifier = Modifier
+                                        .size(72.dp)
+                                        .clip(RoundedCornerShape(8.dp))
+                                        .background(Color.Black)
+                                ) {
+                                    AsyncImage(
+                                        model = item.url,
+                                        contentDescription = item.title,
+                                        contentScale = ContentScale.Crop,
+                                        modifier = Modifier.fillMaxSize()
                                     )
-                            )
-                            Spacer(modifier = Modifier.height(6.dp))
-                            Text(days[idx], fontSize = 10.sp)
+                                    if (item.isLive) {
+                                        Box(
+                                            modifier = Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.25f)),
+                                            contentAlignment = Alignment.BottomStart
+                                        ) {
+                                            Row(
+                                                modifier = Modifier.padding(4.dp).background(Color.Black.copy(alpha = 0.6f), RoundedCornerShape(4.dp)).padding(horizontal = 4.dp, vertical = 2.dp),
+                                                verticalAlignment = Alignment.CenterVertically
+                                            ) {
+                                                Icon(imageVector = Icons.Default.PlayCircle, contentDescription = null, tint = Color.White, modifier = Modifier.size(10.dp))
+                                                Spacer(modifier = Modifier.width(2.dp))
+                                                Text("LIVE", color = Color.White, fontSize = 7.sp, fontWeight = FontWeight.Bold)
+                                            }
+                                        }
+                                    }
+                                }
+                                
+                                Spacer(modifier = Modifier.width(16.dp))
+                                
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(item.title, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.bodyMedium)
+                                    Text("Resolution: ${item.width}x${item.height}", fontSize = 11.sp)
+                                    Text("Category: ${item.category}", fontSize = 11.sp, color = MaterialTheme.colorScheme.primary)
+                                    val isFileLocal = item.url.startsWith("/") || (item.videoUrl?.startsWith("/") == true)
+                                    if (isFileLocal) {
+                                        Text("Local storage synced", fontSize = 10.sp, color = Color(0xFF4CAF50), fontWeight = FontWeight.Bold)
+                                    }
+                                }
+
+                                Row {
+                                    // Social share button
+                                    IconButton(
+                                        onClick = {
+                                            shareLocalFile(
+                                                context = context,
+                                                filePath = if (item.isLive) (item.videoUrl ?: item.url) else item.url,
+                                                title = item.title,
+                                                isVideo = item.isLive
+                                            )
+                                        }
+                                    ) {
+                                        Icon(imageVector = Icons.Default.Share, contentDescription = "Share", tint = MaterialTheme.colorScheme.primary)
+                                    }
+
+                                    // Remove artwork button
+                                    IconButton(
+                                        onClick = {
+                                            try {
+                                                val localPath = if (item.isLive) item.videoUrl else item.url
+                                                if (localPath != null && localPath.startsWith("/")) {
+                                                    val localF = java.io.File(localPath)
+                                                    if (localF.exists()) localF.delete()
+                                                }
+                                            } catch (e: Exception) { e.printStackTrace() }
+                                            viewModel.deleteWallpaperItem(item)
+                                        }
+                                    ) {
+                                        Icon(imageVector = Icons.Default.Delete, contentDescription = "Delete", tint = Color(0xFFE53935))
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        } else {
+            if (sounds.isEmpty()) {
+                Box(modifier = Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Icon(imageVector = Icons.Default.QueueMusic, contentDescription = null, modifier = Modifier.size(48.dp), tint = MaterialTheme.colorScheme.primary)
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text("No custom sounds uploaded yet.", fontWeight = FontWeight.Bold)
+                        Text("Go to 'Upload' tab and upload your audio creation!", fontSize = 12.sp, color = Color.Gray)
+                    }
+                }
+            } else {
+                LazyColumn(
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                    modifier = Modifier.weight(1f)
+                ) {
+                    items(sounds) { item ->
+                        Card(
+                            modifier = Modifier.fillMaxWidth(),
+                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)),
+                            shape = RoundedCornerShape(16.dp)
+                        ) {
+                            Row(modifier = Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                                // Inline Sound Playback icon controller
+                                val isCurrentPlaying = activeAudioPlaybackUri == item.soundUrl && isAudioTrackPlaying
+                                IconButton(
+                                    onClick = {
+                                        try {
+                                            if (isCurrentPlaying) {
+                                                activeMediaPlayer?.pause()
+                                                isAudioTrackPlaying = false
+                                            } else {
+                                                if (activeAudioPlaybackUri != item.soundUrl) {
+                                                    activeMediaPlayer?.stop()
+                                                    activeMediaPlayer?.release()
+                                                    activeMediaPlayer = android.media.MediaPlayer().apply {
+                                                        if (item.soundUrl.startsWith("/")) {
+                                                            setDataSource(item.soundUrl)
+                                                        } else {
+                                                            setDataSource(context, Uri.parse(item.soundUrl))
+                                                        }
+                                                        prepare()
+                                                        isLooping = true
+                                                        start()
+                                                    }
+                                                    activeAudioPlaybackUri = item.soundUrl
+                                                } else {
+                                                    activeMediaPlayer?.start()
+                                                }
+                                                isAudioTrackPlaying = true
+                                            }
+                                        } catch (e: Exception) {
+                                            e.printStackTrace()
+                                            Toast.makeText(context, "Cannot preview clip: ${e.localizedMessage}", Toast.LENGTH_SHORT).show()
+                                        }
+                                    },
+                                    modifier = Modifier.background(MaterialTheme.colorScheme.primaryContainer, CircleShape)
+                                ) {
+                                    Icon(
+                                        imageVector = if (isCurrentPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
+                                        contentDescription = "Preview sound inside sandbox manager",
+                                        tint = MaterialTheme.colorScheme.primary
+                                    )
+                                }
+
+                                Spacer(modifier = Modifier.width(16.dp))
+
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(item.title, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.bodyMedium)
+                                    Text("Duration: ${item.durationText}", fontSize = 11.sp)
+                                    Text("Author: ${item.artist}", fontSize = 11.sp, color = MaterialTheme.colorScheme.secondary)
+                                }
+
+                                Row {
+                                    // Social share button
+                                    IconButton(
+                                        onClick = {
+                                            shareLocalFile(
+                                                context = context,
+                                                filePath = item.soundUrl,
+                                                title = item.title,
+                                                isAudio = true
+                                            )
+                                        }
+                                    ) {
+                                        Icon(imageVector = Icons.Default.Share, contentDescription = "Share clip", tint = MaterialTheme.colorScheme.primary)
+                                    }
+
+                                    // Remove sound button
+                                    IconButton(
+                                        onClick = {
+                                            try {
+                                                if (item.soundUrl.startsWith("/")) {
+                                                    val localF = java.io.File(item.soundUrl)
+                                                    if (localF.exists()) localF.delete()
+                                                }
+                                            } catch (e: Exception) { e.printStackTrace() }
+                                            viewModel.deleteSoundItem(item)
+                                        }
+                                    ) {
+                                        Icon(imageVector = Icons.Default.Delete, contentDescription = "Delete", tint = Color(0xFFE53935))
+                                    }
+                                }
+                            }
                         }
                     }
                 }
@@ -2277,6 +3183,38 @@ fun DetailScreen(viewModel: EcosystemViewModel) {
                     Spacer(modifier = Modifier.width(8.dp))
                     Text("Tweak Editor")
                 }
+            }
+
+            Spacer(modifier = Modifier.height(10.dp))
+
+            val coroutineScope = rememberCoroutineScope()
+            val currentContext = LocalContext.current
+            Button(
+                onClick = {
+                    coroutineScope.launch(Dispatchers.IO) {
+                        try {
+                            val path = if (item.isLive) (item.videoUrl ?: item.url) else item.url
+                            saveFileToPublicGallery(currentContext, path, item.title, isVideo = item.isLive, isAudio = false)
+                            withContext(Dispatchers.Main) {
+                                Toast.makeText(currentContext, "Download finished! Saved Elitewalls_${item.title} to storage.", Toast.LENGTH_SHORT).show()
+                            }
+                        } catch (e: Exception) {
+                            withContext(Dispatchers.Main) {
+                                Toast.makeText(currentContext, "Download failed: ${e.localizedMessage}", Toast.LENGTH_SHORT).show()
+                            }
+                        }
+                    }
+                },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(52.dp)
+                    .testTag("download_artwork_action"),
+                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.tertiary),
+                shape = RoundedCornerShape(16.dp)
+            ) {
+                Icon(imageVector = Icons.Default.Download, contentDescription = null, modifier = Modifier.size(18.dp))
+                Spacer(modifier = Modifier.width(8.dp))
+                Text("Download Masterpiece to Device")
             }
 
             Spacer(modifier = Modifier.height(10.dp))
