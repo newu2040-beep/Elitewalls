@@ -162,6 +162,116 @@ private val LightSunsetScheme = lightColorScheme(
     onSurface = Color(0xFFBF360C)
 )
 
+// --- Pastel Lavender Theme ---
+private val DarkPastelLavenderScheme = darkColorScheme(
+    primary = Color(0xFFC7B1F7),
+    secondary = Color(0xFFE4DAFC),
+    tertiary = Color(0xFFF0E5FF),
+    background = Color(0xFF1E1A2B),
+    surface = Color(0xFF28233A),
+    onPrimary = Color(0xFF381A6F),
+    onBackground = Color(0xFFE4DAFC),
+    onSurface = Color(0xFFE4DAFC)
+)
+private val LightPastelLavenderScheme = lightColorScheme(
+    primary = Color(0xFF865DFF),
+    secondary = Color(0xFFA58BFF),
+    tertiary = Color(0xFFC7B1F7),
+    background = Color(0xFFFAF7FF),
+    surface = Color(0xFFF1EAFF),
+    onPrimary = Color.White,
+    onBackground = Color(0xFF381A6F),
+    onSurface = Color(0xFF381A6F)
+)
+
+// --- Pastel Peach Theme ---
+private val DarkPastelPeachScheme = darkColorScheme(
+    primary = Color(0xFFF7CBB1),
+    secondary = Color(0xFFFCEADA),
+    tertiary = Color(0xFFFFF0E5),
+    background = Color(0xFF2B211A),
+    surface = Color(0xFF3A2D23),
+    onPrimary = Color(0xFF6F351A),
+    onBackground = Color(0xFFFCEADA),
+    onSurface = Color(0xFFFCEADA)
+)
+private val LightPastelPeachScheme = lightColorScheme(
+    primary = Color(0xFFFF9E7D),
+    secondary = Color(0xFFFFAE94),
+    tertiary = Color(0xFFF7CBB1),
+    background = Color(0xFFFFF7F2),
+    surface = Color(0xFFFFE8D6),
+    onPrimary = Color.White,
+    onBackground = Color(0xFF6F351A),
+    onSurface = Color(0xFF6F351A)
+)
+
+// --- Pastel Mint Theme ---
+private val DarkPastelMintScheme = darkColorScheme(
+    primary = Color(0xFFB1F7D7),
+    secondary = Color(0xFFDAFCEB),
+    tertiary = Color(0xFFE5FFF2),
+    background = Color(0xFF1A2B23),
+    surface = Color(0xFF233A30),
+    onPrimary = Color(0xFF1A6F44),
+    onBackground = Color(0xFFDAFCEB),
+    onSurface = Color(0xFFDAFCEB)
+)
+private val LightPastelMintScheme = lightColorScheme(
+    primary = Color(0xFF5DFF9C),
+    secondary = Color(0xFF8BFFAA),
+    tertiary = Color(0xFFB1F7D7),
+    background = Color(0xFFF2FFF8),
+    surface = Color(0xFFD6FFE9),
+    onPrimary = Color(0xFF1A6F44),
+    onBackground = Color(0xFF1A6F44),
+    onSurface = Color(0xFF1A6F44)
+)
+
+// --- Pastel Rose Theme ---
+private val DarkPastelRoseScheme = darkColorScheme(
+    primary = Color(0xFFF7B1C7),
+    secondary = Color(0xFFFCDAE4),
+    tertiary = Color(0xFFFFE5EE),
+    background = Color(0xFF2B1A20),
+    surface = Color(0xFF3A232B),
+    onPrimary = Color(0xFF6F1A33),
+    onBackground = Color(0xFFFCDAE4),
+    onSurface = Color(0xFFFCDAE4)
+)
+private val LightPastelRoseScheme = lightColorScheme(
+    primary = Color(0xFFFFA5B8),
+    secondary = Color(0xFFFFC0CD),
+    tertiary = Color(0xFFF7B1C7),
+    background = Color(0xFFFFF2F5),
+    surface = Color(0xFFFFD6E0),
+    onPrimary = Color.White,
+    onBackground = Color(0xFF6F1A33),
+    onSurface = Color(0xFF6F1A33)
+)
+
+// --- Pastel Sky Theme ---
+private val DarkPastelSkyScheme = darkColorScheme(
+    primary = Color(0xFFB1ECF7),
+    secondary = Color(0xFFDAF8FC),
+    tertiary = Color(0xFFE5FAFF),
+    background = Color(0xFF1A262B),
+    surface = Color(0xFF23333A),
+    onPrimary = Color(0xFF1A586F),
+    onBackground = Color(0xFFDAF8FC),
+    onSurface = Color(0xFFDAF8FC)
+)
+private val LightPastelSkyScheme = lightColorScheme(
+    primary = Color(0xFF5DCFFF),
+    secondary = Color(0xFF8BE4FF),
+    tertiary = Color(0xFFB1ECF7),
+    background = Color(0xFFF2FBFF),
+    surface = Color(0xFFD6F3FF),
+    onPrimary = Color.White,
+    onBackground = Color(0xFF1A586F),
+    onSurface = Color(0xFF1A586F)
+)
+
 @Composable
 fun ElitewallsTheme(
     themeStyle: AppThemeStyle = AppThemeStyle.LAVENDER,
@@ -178,6 +288,11 @@ fun ElitewallsTheme(
         AppThemeStyle.SAKURA_PINK -> if (darkTheme) DarkSakuraScheme else LightSakuraScheme
         AppThemeStyle.ARCTIC_WHITE -> if (darkTheme) DarkArcticScheme else LightArcticScheme
         AppThemeStyle.SUNSET_ORANGE -> if (darkTheme) DarkSunsetScheme else LightSunsetScheme
+        AppThemeStyle.PASTEL_LAVENDER -> if (darkTheme) DarkPastelLavenderScheme else LightPastelLavenderScheme
+        AppThemeStyle.PASTEL_PEACH -> if (darkTheme) DarkPastelPeachScheme else LightPastelPeachScheme
+        AppThemeStyle.PASTEL_MINT -> if (darkTheme) DarkPastelMintScheme else LightPastelMintScheme
+        AppThemeStyle.PASTEL_ROSE -> if (darkTheme) DarkPastelRoseScheme else LightPastelRoseScheme
+        AppThemeStyle.PASTEL_SKY -> if (darkTheme) DarkPastelSkyScheme else LightPastelSkyScheme
         AppThemeStyle.DYNAMIC_ADAPTIVE -> {
             if (darkTheme) {
                 darkColorScheme(

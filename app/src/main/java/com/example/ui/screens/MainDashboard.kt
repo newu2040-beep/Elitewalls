@@ -406,6 +406,11 @@ fun MainDashboard(viewModel: EcosystemViewModel) {
                                                             AppThemeStyle.SAKURA_PINK -> Color(0xFFF48FB1)
                                                             AppThemeStyle.ARCTIC_WHITE -> Color(0xFFE0F7FA)
                                                             AppThemeStyle.SUNSET_ORANGE -> Color(0xFFFFAB91)
+                                                            AppThemeStyle.PASTEL_LAVENDER -> Color(0xFFC7B1F7)
+                                                            AppThemeStyle.PASTEL_PEACH -> Color(0xFFF7CBB1)
+                                                            AppThemeStyle.PASTEL_MINT -> Color(0xFFB1F7D7)
+                                                            AppThemeStyle.PASTEL_ROSE -> Color(0xFFF7B1C7)
+                                                            AppThemeStyle.PASTEL_SKY -> Color(0xFFB1ECF7)
                                                             AppThemeStyle.DYNAMIC_ADAPTIVE -> MaterialTheme.colorScheme.primary
                                                         }
                                                     )
@@ -1615,6 +1620,22 @@ fun UploadCenterScreen(viewModel: EcosystemViewModel) {
         }
     }
 
+    val permissionToRequest = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+        android.Manifest.permission.READ_MEDIA_IMAGES
+    } else {
+        android.Manifest.permission.READ_EXTERNAL_STORAGE
+    }
+
+    val permissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { isGranted ->
+        if (isGranted) {
+            galleryLauncher.launch("image/*")
+        } else {
+            Toast.makeText(context, "Storage permission is required to safely upload local gallery creations.", Toast.LENGTH_LONG).show()
+        }
+    }
+
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -1640,7 +1661,19 @@ fun UploadCenterScreen(viewModel: EcosystemViewModel) {
 
                 // GALLERY PICKER TRIGGER BUTTON
                 Button(
-                    onClick = { galleryLauncher.launch("image/*") },
+                    onClick = {
+                        val hasPermission = androidx.core.content.ContextCompat.checkSelfPermission(
+                            context,
+                            permissionToRequest
+                        ) == android.content.pm.PackageManager.PERMISSION_GRANTED
+
+                        if (hasPermission) {
+                            galleryLauncher.launch("image/*")
+                        } else {
+                            Toast.makeText(context, "Requesting Storage Permission...", Toast.LENGTH_SHORT).show()
+                            permissionLauncher.launch(permissionToRequest)
+                        }
+                    },
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(bottom = 16.dp),
@@ -2650,16 +2683,32 @@ fun ApplyPreviewScreen(viewModel: EcosystemViewModel) {
         Box(modifier = Modifier.fillMaxSize()) {
             val compiledMatrix = remember(editor) { compileColorFiltersMatrix(editor) }
 
-            // Fullscreen Dynamic Preview
-            AsyncImage(
-                model = item.url,
-                contentDescription = null,
-                contentScale = ContentScale.Crop,
-                colorFilter = ColorFilter.colorMatrix(compiledMatrix),
-                modifier = Modifier
-                    .fillMaxSize()
-                    .blur((if (editor.blurRadius > 0f) editor.blurRadius else 0f).dp)
-            )
+            // Fullscreen Dynamic Preview (Video player for Live Video or Static Image)
+            if (item.isLive && item.videoUrl != null) {
+                AndroidView(
+                    factory = { ctx ->
+                        VideoView(ctx).apply {
+                            setVideoURI(Uri.parse(item.videoUrl))
+                            setOnPreparedListener { mp ->
+                                mp.isLooping = true
+                                mp.setVolume(0f, 0f) // Silent preview during setup
+                                start()
+                            }
+                        }
+                    },
+                    modifier = Modifier.fillMaxSize()
+                )
+            } else {
+                AsyncImage(
+                    model = item.url,
+                    contentDescription = null,
+                    contentScale = ContentScale.Crop,
+                    colorFilter = ColorFilter.colorMatrix(compiledMatrix),
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .blur((if (editor.blurRadius > 0f) editor.blurRadius else 0f).dp)
+                )
+            }
 
             // Neon glows or overlays
             if (editor.neonGlow) {
@@ -2685,7 +2734,10 @@ fun ApplyPreviewScreen(viewModel: EcosystemViewModel) {
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 IconButton(
-                    onClick = { viewModel.navigateBack() },
+                    onClick = { 
+                        viewModel.stopAudio()
+                        viewModel.navigateBack() 
+                    },
                     modifier = Modifier.background(Color.Black.copy(alpha = 0.5f), CircleShape)
                 ) {
                     Icon(imageVector = Icons.Default.ArrowBack, contentDescription = "Exit preview", tint = Color.White)
@@ -2704,6 +2756,7 @@ fun ApplyPreviewScreen(viewModel: EcosystemViewModel) {
             val setWallpaperRealTime: (String) -> Unit = { target ->
                 scope.launch {
                     applyingInProgress = true
+                    viewModel.stopAudio() // Stop audio preview upon set wallpaper
                     try {
                         val imageLoader = coil.Coil.imageLoader(context)
                         val request = coil.request.ImageRequest.Builder(context)
@@ -2747,7 +2800,7 @@ fun ApplyPreviewScreen(viewModel: EcosystemViewModel) {
             // Bottom application drawer
             Card(
                 shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp),
-                colors = CardDefaults.cardColors(containerColor = Color.Black.copy(alpha = 0.75f)),
+                colors = CardDefaults.cardColors(containerColor = Color.Black.copy(alpha = 0.85f)),
                 modifier = Modifier
                     .fillMaxWidth()
                     .align(Alignment.BottomCenter)
@@ -2758,8 +2811,60 @@ fun ApplyPreviewScreen(viewModel: EcosystemViewModel) {
                     modifier = Modifier.padding(20.dp),
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
-                    Text("Apply Layout", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                    // Soundtrack Preview Row
+                    val syncAudio = item.syncSoundUrl ?: "https://actions.google.com/sounds/v1/ambient/ocean_waves.ogg"
+                    val soundItemForWp = SoundItem(
+                        id = "sync_wp_sound_${item.id}",
+                        title = "${item.title} Soundtrack",
+                        category = "Ambient",
+                        artist = item.author,
+                        soundUrl = syncAudio
+                    )
+                    
+                    val activePlaySoundId by viewModel.playActiveSoundId.collectAsState()
+                    val isPlayingSound = activePlaySoundId == soundItemForWp.id
+
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(Color.White.copy(alpha = 0.08f), RoundedCornerShape(12.dp))
+                            .padding(horizontal = 14.dp, vertical = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                imageVector = if (isPlayingSound) Icons.Default.MusicVideo else Icons.Default.MusicNote,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(20.dp)
+                            )
+                            Spacer(modifier = Modifier.width(10.dp))
+                            Column {
+                                Text("Acoustic Sound Preview", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                Text(if (item.syncSoundUrl != null) "Synchronized ambient loop" else "Atmospheric sound overlay", color = Color.LightGray, fontSize = 9.sp)
+                            }
+                        }
+
+                        IconButton(
+                            onClick = { viewModel.togglePlaySound(soundItemForWp) },
+                            modifier = Modifier
+                                .size(32.dp)
+                                .background(MaterialTheme.colorScheme.primary, CircleShape)
+                        ) {
+                            Icon(
+                                imageVector = if (isPlayingSound) Icons.Default.Pause else Icons.Default.PlayArrow,
+                                contentDescription = "Play sound preview",
+                                tint = Color.White,
+                                modifier = Modifier.size(16.dp)
+                            )
+                        }
+                    }
+                    
                     Spacer(modifier = Modifier.height(16.dp))
+
+                    Text("Apply Layout", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                    Spacer(modifier = Modifier.height(12.dp))
 
                     Row(
                         modifier = Modifier.fillMaxWidth(),

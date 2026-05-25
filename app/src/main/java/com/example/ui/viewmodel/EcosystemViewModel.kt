@@ -3,6 +3,9 @@ package com.example.ui.viewmodel
 import android.app.Application
 import android.graphics.Bitmap
 import android.media.MediaPlayer
+import android.media.AudioFormat
+import android.media.AudioManager
+import android.media.AudioTrack
 import android.widget.Toast
 import androidx.compose.ui.graphics.Color
 import androidx.lifecycle.AndroidViewModel
@@ -56,6 +59,11 @@ enum class AppThemeStyle {
     SAKURA_PINK,
     ARCTIC_WHITE,
     SUNSET_ORANGE,
+    PASTEL_LAVENDER,
+    PASTEL_PEACH,
+    PASTEL_MINT,
+    PASTEL_ROSE,
+    PASTEL_SKY,
     DYNAMIC_ADAPTIVE
 }
 
@@ -123,6 +131,8 @@ class EcosystemViewModel(application: Application) : AndroidViewModel(applicatio
     val trimProgressStart = MutableStateFlow(0.1f) // Trim bounds
     val trimProgressEnd = MutableStateFlow(0.9f)
     private var mediaPlayer: MediaPlayer? = null
+    private var synthThread: Thread? = null
+    private var isSynthPlaying = false
 
     // --- Themes & Dynamic Coloring ---
     val activeTheme = MutableStateFlow(AppThemeStyle.OCEAN_BLUE)
@@ -254,6 +264,114 @@ class EcosystemViewModel(application: Application) : AndroidViewModel(applicatio
         }
     }
 
+    private fun playOfflineFallbackSynth(category: String, title: String) {
+        stopOfflineSynth()
+        isSynthPlaying = true
+        synthThread = Thread {
+            val sampleRate = 44100
+            val durationSeconds = if (category.contains("ambient", true)) 6 else 3
+            val numSamples = durationSeconds * sampleRate
+            val sample = DoubleArray(numSamples)
+            val buffer = ShortArray(numSamples)
+
+            val baseFreq = when {
+                category.contains("ringtone", true) -> 523.25 // C5
+                category.contains("meme", true) -> 330.0
+                category.contains("effect", true) -> 880.0
+                else -> 220.0
+            }
+
+            for (i in 0 until numSamples) {
+                if (!isSynthPlaying) break
+                val t = i.toDouble() / sampleRate
+                
+                // Generate melodic wave patterns
+                val frequency = when {
+                    category.contains("ringtone", true) -> {
+                        // Alternating telephone rings or pastel electronic blips
+                        val ringCycle = (t * 6).toInt() % 3
+                        if (ringCycle < 2) baseFreq * (1.0 + 0.15 * Math.sin(2 * Math.PI * 18 * t)) else 0.0
+                    }
+                    category.contains("meme", true) -> {
+                        // Retro arcade cartoon slide pitch
+                        baseFreq * (1.0 - (t % 1.0) * 0.5)
+                    }
+                    category.contains("effect", true) -> {
+                        // Glitch teleport scan sirenic wave
+                        baseFreq * (1.0 + Math.sin(2 * Math.PI * 14 * t) * 0.4)
+                    }
+                    else -> {
+                        // Lush ambient pad pulse
+                        baseFreq * (1.0 + 0.06 * Math.sin(2 * Math.PI * 0.4 * t))
+                    }
+                }
+                
+                if (frequency > 0) {
+                    sample[i] = Math.sin(2 * Math.PI * frequency * t)
+                    // Add bright retro harmonics
+                    if (category.contains("ringtone", true) || category.contains("meme", true)) {
+                        sample[i] += 0.35 * Math.sin(2 * Math.PI * (frequency * 1.5) * t)
+                    }
+                    // Ease out volume smoothly toward the end
+                    val fadeOut = if (i > numSamples - 8820) (numSamples - i).toDouble() / 8820.0 else 1.0
+                    val introFade = if (i < 4410) i.toDouble() / 4410.0 else 1.0
+                    buffer[i] = (sample[i] * 32767.0 * 0.25 * fadeOut * introFade).toInt().toShort()
+                } else {
+                    buffer[i] = 0
+                }
+            }
+
+            if (isSynthPlaying) {
+                try {
+                    val minBufferSize = AudioTrack.getMinBufferSize(
+                        sampleRate,
+                        AudioFormat.CHANNEL_OUT_MONO,
+                        AudioFormat.ENCODING_PCM_16BIT
+                    )
+                    val audioTrack = AudioTrack(
+                        AudioManager.STREAM_MUSIC,
+                        sampleRate,
+                        AudioFormat.CHANNEL_OUT_MONO,
+                        AudioFormat.ENCODING_PCM_16BIT,
+                        minBufferSize.coerceAtLeast(buffer.size * 2),
+                        AudioTrack.MODE_STATIC
+                    )
+                    audioTrack.write(buffer, 0, buffer.size)
+                    if (isSynthPlaying) {
+                        viewModelScope.launch(Dispatchers.Main) {
+                            Toast.makeText(getApplication(), "Offline Synthesizer Playing: $title", Toast.LENGTH_SHORT).show()
+                        }
+                        audioTrack.play()
+                        
+                        val sleepMs = durationSeconds * 1000L
+                        var elapsed = 0L
+                        while (elapsed < sleepMs && isSynthPlaying) {
+                            Thread.sleep(100)
+                            elapsed += 100
+                        }
+                    }
+                    audioTrack.stop()
+                    audioTrack.release()
+                } catch (e: Exception) {
+                    e.printStackTrace()
+                }
+            }
+            // Reset state
+            viewModelScope.launch(Dispatchers.Main) {
+                if (isSynthPlaying) {
+                    playActiveSoundId.value = null
+                    isSynthPlaying = false
+                }
+            }
+        }.apply { start() }
+    }
+
+    private fun stopOfflineSynth() {
+        isSynthPlaying = false
+        synthThread?.interrupt()
+        synthThread = null
+    }
+
     private fun simulateAudioPlayback(sound: SoundItem) {
         stopAudio()
         try {
@@ -267,21 +385,25 @@ class EcosystemViewModel(application: Application) : AndroidViewModel(applicatio
                     setOnCompletionListener {
                         playActiveSoundId.value = null
                     }
+                    setOnErrorListener { _, _, _ ->
+                        playOfflineFallbackSynth(sound.category, sound.title)
+                        true
+                    }
                     prepareAsync()
                 }
                 Toast.makeText(getApplication(), "Buffering stream: ${sound.title}...", Toast.LENGTH_SHORT).show()
             } else {
-                // local asset or sound simulation fallback
-                Toast.makeText(getApplication(), "Playing: ${sound.title} (Simulated audio track)", Toast.LENGTH_SHORT).show()
+                playOfflineFallbackSynth(sound.category, sound.title)
             }
         } catch (e: Exception) {
             e.printStackTrace()
-            Toast.makeText(getApplication(), "Failed to play audio preview offline: ${e.localizedMessage}", Toast.LENGTH_SHORT).show()
+            playOfflineFallbackSynth(sound.category, sound.title)
         }
     }
 
     fun stopAudio() {
         playActiveSoundId.value = null
+        stopOfflineSynth()
         mediaPlayer?.release()
         mediaPlayer = null
     }
