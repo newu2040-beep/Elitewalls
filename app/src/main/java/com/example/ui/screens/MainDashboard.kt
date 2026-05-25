@@ -267,6 +267,7 @@ fun MainDashboard(viewModel: EcosystemViewModel) {
         Triple("Categories", Screen.CATEGORIES, Icons.Default.Category),
         Triple("Live Wallpapers", Screen.LIVE_WALLPAPERS, Icons.Default.MovieFilter),
         Triple("Setups", Screen.SETUPS, Icons.Default.Devices),
+        Triple("Fonts Studio", Screen.FONTS, Icons.Default.FontDownload),
         Triple("Sounds & Ringtones", Screen.SOUNDS, Icons.Default.MusicNote),
         Triple("Favorites", Screen.FAVORITES, Icons.Default.Favorite),
         Triple("Downloads", Screen.DOWNLOADS, Icons.Default.Download),
@@ -388,6 +389,7 @@ fun MainDashboard(viewModel: EcosystemViewModel) {
                                     Screen.HOME -> "ELITEWALLS"
                                     Screen.CATEGORIES -> "Categories"
                                     Screen.LIVE_WALLPAPERS -> "Live Canvas"
+                                    Screen.FONTS -> "Typography Studio"
                                     Screen.SOUNDS -> "Sound Waves"
                                     Screen.FAVORITES -> "Private Vault"
                                     Screen.DOWNLOADS -> "Local Gallery"
@@ -623,6 +625,7 @@ fun MainDashboard(viewModel: EcosystemViewModel) {
                         Screen.FAVORITES -> FavoritesScreen(viewModel, favoritesList, soundsList)
                         Screen.DOWNLOADS -> DownloadsScreen(viewModel, downloadsList)
                         Screen.UPLOAD_CENTER -> UploadCenterScreen(viewModel)
+                        Screen.FONTS -> FontsScreen(viewModel)
                         Screen.SETTINGS -> SettingsScreen(viewModel)
                         Screen.ABOUT -> AboutScreen()
                         Screen.DETAIL -> DetailScreen(viewModel)
@@ -2255,7 +2258,7 @@ fun UploadCenterScreen(viewModel: EcosystemViewModel) {
                                             .background(Color.Black),
                                         contentAlignment = Alignment.Center
                                     ) {
-                                        LiveVideoPlayer(uri = selectedVideoUri.toString(), modifier = Modifier.fillMaxSize())
+                                        LiveVideoPlayer(uri = selectedVideoUri.toString(), modifier = Modifier.fillMaxSize(), isSilent = false)
                                     }
                                     Spacer(modifier = Modifier.height(8.dp))
                                     Text("Raw File size: $videoSizeText", fontSize = 11.sp)
@@ -2854,7 +2857,7 @@ fun DetailScreen(viewModel: EcosystemViewModel) {
                     .testTag("detail_hero_canvas")
             ) {
                 if (item.isLive && item.videoUrl != null) {
-                    LiveVideoPlayer(uri = item.videoUrl, modifier = Modifier.fillMaxSize())
+                    LiveVideoPlayer(uri = item.videoUrl, modifier = Modifier.fillMaxSize(), isSilent = false)
                 } else {
                     AsyncImage(
                         model = ImageRequest.Builder(LocalContext.current)
@@ -3376,7 +3379,7 @@ fun ApplyPreviewScreen(viewModel: EcosystemViewModel) {
 
             // Fullscreen Dynamic Preview (Video player for Live Video or Static Image)
             if (item.isLive && item.videoUrl != null) {
-                LiveVideoPlayer(uri = item.videoUrl, modifier = Modifier.fillMaxSize())
+                LiveVideoPlayer(uri = item.videoUrl, modifier = Modifier.fillMaxSize(), isSilent = false)
             } else {
                 AsyncImage(
                     model = item.url,
@@ -3437,6 +3440,13 @@ fun ApplyPreviewScreen(viewModel: EcosystemViewModel) {
                     applyingInProgress = true
                     viewModel.stopAudio() // Stop audio preview upon set wallpaper
                     try {
+                        if (item.isLive && item.videoUrl != null) {
+                            Toast.makeText(context, "Live video set successfully (Mock: Requires System LiveWallpaperService to persist)", Toast.LENGTH_LONG).show()
+                            viewModel.downloadActiveWallpaper()
+                            viewModel.navigateTo(Screen.HOME)
+                            return@launch
+                        }
+
                         val imageLoader = coil.Coil.imageLoader(context)
                         val request = coil.request.ImageRequest.Builder(context)
                             .data(item.url)
@@ -3606,7 +3616,114 @@ fun ApplyPreviewScreen(viewModel: EcosystemViewModel) {
     }
 }
 
-// ==================== SETUPS SCREEN ====================
+// ==================== FONTS SCREEN ====================
+@Composable
+fun FontsScreen(viewModel: EcosystemViewModel) {
+    val fontsList by viewModel.allFonts.collectAsState()
+    val context = LocalContext.current
+    var isUploading by remember { mutableStateOf(false) }
+    var fontTitle by remember { mutableStateOf("") }
+    
+    val fontPickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.GetContent()
+    ) { uri: Uri? ->
+        uri?.let {
+            val path = copyUriToInternalStorageWithExt(context, it, "ttf")
+            if (path != null) {
+                viewModel.uploadFontItem(path, if (fontTitle.isNotBlank()) fontTitle else "Custom Font")
+                fontTitle = ""
+                isUploading = false
+            }
+        }
+    }
+
+    Column(modifier = Modifier.fillMaxSize()) {
+        Text(
+            text = "Typography Studio",
+            style = MaterialTheme.typography.displaySmall.copy(fontWeight = FontWeight.Bold),
+            modifier = Modifier.padding(16.dp)
+        )
+        Text(
+            text = "Discover or upload highly aesthetic system fonts.",
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
+        )
+        
+        Row(modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+            if (isUploading) {
+                OutlinedTextField(
+                    value = fontTitle,
+                    onValueChange = { fontTitle = it },
+                    label = { Text("Font Family Name") },
+                    modifier = Modifier.weight(1f)
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                Button(onClick = { fontPickerLauncher.launch("*/*") }) {
+                    Text("Select TTF/OTF")
+                }
+                IconButton(onClick = { isUploading = false }) {
+                    Icon(Icons.Default.Close, contentDescription = "Cancel")
+                }
+            } else {
+                Button(
+                    onClick = { isUploading = true },
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Icon(Icons.Default.Upload, contentDescription = null)
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("Upload New Font")
+                }
+            }
+        }
+
+        if (fontsList.isEmpty()) {
+            Box(modifier = Modifier.fillMaxSize().weight(1f), contentAlignment = Alignment.Center) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Icon(imageVector = Icons.Default.FontDownload, contentDescription = null, modifier = Modifier.size(64.dp), tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.5f))
+                    Spacer(modifier = Modifier.height(16.dp))
+                    Text("No fonts shared yet.", style = MaterialTheme.typography.titleMedium)
+                }
+            }
+        } else {
+            LazyColumn(
+                modifier = Modifier.fillMaxSize().weight(1f),
+                contentPadding = PaddingValues(16.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                items(fontsList, key = { it.id }) { fontItem ->
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+                        shape = RoundedCornerShape(16.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(16.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(Icons.Default.FontDownload, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(40.dp))
+                            Spacer(modifier = Modifier.width(16.dp))
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(fontItem.title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                                Text("Shared by ${fontItem.author}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                            IconButton(onClick = { 
+                                saveFileToPublicGallery(context, fontItem.fontUrl, fontItem.title)
+                                Toast.makeText(context, "Font saved to Downloads", Toast.LENGTH_SHORT).show()
+                            }) {
+                                Icon(Icons.Default.Download, contentDescription = "Download Font", tint = MaterialTheme.colorScheme.primary)
+                            }
+                            IconButton(onClick = { viewModel.deleteFontItem(fontItem) }) {
+                                Icon(Icons.Default.Delete, contentDescription = "Delete Font", tint = Color.Red.copy(alpha=0.7f))
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
 @Composable
 fun SetupsScreen(viewModel: EcosystemViewModel) {
     val setupsList by viewModel.allSetups.collectAsState()

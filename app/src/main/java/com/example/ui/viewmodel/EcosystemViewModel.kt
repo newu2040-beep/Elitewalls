@@ -77,6 +77,7 @@ enum class Screen {
     FAVORITES,
     DOWNLOADS,
     UPLOAD_CENTER,
+    FONTS,
     SETTINGS,
     ABOUT,
     DETAIL,
@@ -122,6 +123,9 @@ class EcosystemViewModel(application: Application) : AndroidViewModel(applicatio
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     val allSetups: StateFlow<List<SetupItem>> = repository.allSetups
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    val allFonts: StateFlow<List<com.example.data.models.FontItem>> = repository.allFonts
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     val creatorStats: StateFlow<CreatorStats> = repository.getCreatorStats()
@@ -585,6 +589,24 @@ class EcosystemViewModel(application: Application) : AndroidViewModel(applicatio
         viewModelScope.launch {
             repository.deleteSetup(item)
             Toast.makeText(getApplication(), "Successfully deleted setup \"${item.title}\"!", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    fun uploadFontItem(path: String, name: String) {
+        viewModelScope.launch {
+            val font = com.example.data.models.FontItem(
+                title = name,
+                fontUrl = path
+            )
+            repository.uploadFont(font)
+            Toast.makeText(getApplication(), "Font Uploaded to Community!", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    fun deleteFontItem(font: com.example.data.models.FontItem) {
+        viewModelScope.launch {
+            repository.deleteFont(font)
+            Toast.makeText(getApplication(), "Font Deleted!", Toast.LENGTH_SHORT).show()
         }
     }
 

@@ -68,6 +68,16 @@ data class SetupItem(
     val timestamp: Long = System.currentTimeMillis()
 )
 
+@Entity(tableName = "font_items")
+data class FontItem(
+    @PrimaryKey val id: String = UUID.randomUUID().toString(),
+    val title: String,
+    val author: String = "Community",
+    val fontUrl: String, // local path
+    val downloadsCount: Int = 0,
+    val timestamp: Long = System.currentTimeMillis()
+)
+
 data class CreatorStats(
     val totalUploads: Int = 8,
     val totalDownloads: Int = 12400,

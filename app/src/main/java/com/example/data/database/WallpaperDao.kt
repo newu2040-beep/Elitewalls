@@ -94,4 +94,17 @@ interface WallpaperDao {
 
     @Delete
     suspend fun deleteCollection(collection: CollectionItem)
+
+    // --- Fonts API ---
+    @Query("SELECT * FROM font_items ORDER BY timestamp DESC")
+    fun getAllFonts(): Flow<List<com.example.data.models.FontItem>>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertFont(font: com.example.data.models.FontItem)
+
+    @Delete
+    suspend fun deleteFont(font: com.example.data.models.FontItem)
+
+    @Query("DELETE FROM font_items")
+    suspend fun deleteAllFonts()
 }

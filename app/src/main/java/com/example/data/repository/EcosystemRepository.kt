@@ -147,6 +147,17 @@ class EcosystemRepository(private val dao: WallpaperDao) {
         dao.deleteSetup(setup)
     }
 
+    // --- Fonts ---
+    val allFonts: Flow<List<com.example.data.models.FontItem>> = dao.getAllFonts()
+
+    suspend fun uploadFont(font: com.example.data.models.FontItem) {
+        dao.insertFont(font)
+    }
+
+    suspend fun deleteFont(font: com.example.data.models.FontItem) {
+        dao.deleteFont(font)
+    }
+
     // --- Creator Analytics Flow ---
     fun getCreatorStats(): Flow<CreatorStats> = flow {
         val wps = dao.getAllWallpapers().first().filter { it.author == "Rahul Shah" }
