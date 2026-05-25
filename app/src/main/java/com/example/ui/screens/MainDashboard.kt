@@ -1,0 +1,2565 @@
+package com.example.ui.screens
+
+import android.app.WallpaperManager
+import android.content.Context
+import android.graphics.Bitmap
+import android.widget.Toast
+import androidx.compose.animation.*
+import androidx.compose.animation.core.*
+import androidx.compose.foundation.*
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.layout.*
+import androidx.compose.material.ripple.rememberRipple
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.Undo
+import androidx.compose.material.icons.automirrored.filled.Redo
+import androidx.compose.material.icons.filled.*
+import androidx.compose.material.icons.outlined.*
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.blur
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.*
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import coil.compose.AsyncImage
+import coil.request.ImageRequest
+import com.example.data.models.CollectionItem
+import com.example.data.models.SoundItem
+import com.example.data.models.WallpaperItem
+import com.example.ui.viewmodel.AppThemeStyle
+import com.example.ui.viewmodel.EcosystemViewModel
+import com.example.ui.viewmodel.EditorSettings
+import com.example.ui.viewmodel.Screen
+import kotlinx.coroutines.launch
+
+// --- Glassmorphic Glass Modifier ---
+@Composable
+fun Modifier.glassmorphic(
+    backgroundColor: Color = MaterialTheme.colorScheme.surface.copy(alpha = 0.4f),
+    borderColor: Color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.12f),
+    cornerRadius: Dp = 24.dp
+): Modifier {
+    return this
+        .background(
+            brush = Brush.verticalGradient(
+                colors = listOf(backgroundColor, backgroundColor.copy(alpha = 0.15f))
+            ),
+            shape = RoundedCornerShape(cornerRadius)
+        )
+        .border(1.dp, borderColor, RoundedCornerShape(cornerRadius))
+}
+
+// --- Dynamic Color Matrix Generator for GPU Styling ---
+fun compileColorFiltersMatrix(settings: EditorSettings): ColorMatrix {
+    val matrix = ColorMatrix()
+
+    // 1. Saturation
+    matrix.setToSaturation(settings.saturation)
+
+    // 2. Custom brightness/contrast and tint logic compiled manually
+    val b = settings.brightness * 255f
+    val c = settings.contrast
+
+    // Apply amoled blackener
+    val darkenerFactor = 1f - settings.amoledDarkener
+
+    // Filter style layers
+    var rTint = 1f
+    var gTint = 1f
+    var bTint = 1f
+
+    if (settings.cyberpunkFilter) {
+        rTint = 1.3f
+        gTint = 0.5f
+        bTint = 1.4f
+    } else if (settings.vintageFilter) {
+        rTint = 1.2f
+        gTint = 1.0f
+        bTint = 0.8f
+    }
+
+    settings.colorFilterTint?.let { color ->
+        rTint *= color.red
+        gTint *= color.green
+        bTint *= color.blue
+    }
+
+    val customMatrix = floatArrayOf(
+        c * rTint * darkenerFactor, 0f, 0f, 0f, b,
+        0f, c * gTint * darkenerFactor, 0f, 0f, b,
+        0f, 0f, c * bTint * darkenerFactor, 0f, b,
+        0f, 0f, 0f, 1f, 0f
+    )
+
+    val finalMatrix = ColorMatrix()
+    finalMatrix.set(matrix)
+    finalMatrix.timesAssign(ColorMatrix(customMatrix))
+    return finalMatrix
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun MainDashboard(viewModel: EcosystemViewModel) {
+    val scope = rememberCoroutineScope()
+    val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
+    val currentView by viewModel.currentScreen.collectAsState()
+
+    // Base properties
+    val wallpaperList by viewModel.allWallpapers.collectAsState()
+    val liveList by viewModel.liveWallpapers.collectAsState()
+    val favoritesList by viewModel.favoriteWallpapers.collectAsState()
+    val downloadsList by viewModel.downloadedWallpapers.collectAsState()
+    val soundsList by viewModel.allSounds.collectAsState()
+    val collectionsList by viewModel.allCollections.collectAsState()
+
+    val pActiveSound by viewModel.playActiveSoundId.collectAsState()
+    val activeThemeValue by viewModel.activeTheme.collectAsState()
+    val darkValue by viewModel.isDarkMode.collectAsState()
+    val amoledValue by viewModel.isAmoledMode.collectAsState()
+
+    // Navigation lists mapped to sections
+    val drawerItems = listOf(
+        Triple("Home", Screen.HOME, Icons.Default.Home),
+        Triple("Categories", Screen.CATEGORIES, Icons.Default.Category),
+        Triple("Live Wallpapers", Screen.LIVE_WALLPAPERS, Icons.Default.MovieFilter),
+        Triple("Sounds & Ringtones", Screen.SOUNDS, Icons.Default.MusicNote),
+        Triple("Favorites", Screen.FAVORITES, Icons.Default.Favorite),
+        Triple("Downloads", Screen.DOWNLOADS, Icons.Default.Download),
+        Triple("Upload Center", Screen.UPLOAD_CENTER, Icons.Default.CloudUpload),
+        Triple("Creator Dashboard", Screen.CREATOR_DASHBOARD, Icons.Default.Dashboard),
+        Triple("Settings", Screen.SETTINGS, Icons.Default.Settings),
+        Triple("About", Screen.ABOUT, Icons.Default.Info)
+    )
+
+    ModalNavigationDrawer(
+        drawerState = drawerState,
+        drawerContent = {
+            ModalDrawerSheet(
+                modifier = Modifier
+                    .width(300.dp)
+                    .fillMaxHeight(),
+                drawerContainerColor = MaterialTheme.colorScheme.background,
+                drawerShape = RoundedCornerShape(topEnd = 32.dp, bottomEnd = 32.dp)
+            ) {
+                Spacer(modifier = Modifier.height(28.dp))
+                // Elite Title Box
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 24.dp)
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Box(
+                            modifier = Modifier
+                                .size(48.dp)
+                                .clip(RoundedCornerShape(16.dp))
+                                .background(
+                                    Brush.linearGradient(
+                                        listOf(
+                                            MaterialTheme.colorScheme.primary,
+                                            MaterialTheme.colorScheme.secondary
+                                        )
+                                    )
+                                ),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Wallpaper,
+                                contentDescription = "Elitewalls Logo icon",
+                                tint = Color.White,
+                                modifier = Modifier.size(26.dp)
+                            )
+                        }
+                        Spacer(modifier = Modifier.width(16.dp))
+                        Column {
+                            Text(
+                                text = "ELITEWALLS",
+                                style = MaterialTheme.typography.titleLarge.copy(
+                                    fontWeight = FontWeight.ExtraBold,
+                                    letterSpacing = 1.2.sp
+                                ),
+                                color = MaterialTheme.colorScheme.onBackground
+                            )
+                            Text(
+                                text = "Premium Ecosystem v2.5",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                        }
+                    }
+                    Spacer(modifier = Modifier.height(16.dp))
+                    Divider(color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f))
+                }
+                Spacer(modifier = Modifier.height(16.dp))
+
+                // Menu items
+                LazyColumn(
+                    modifier = Modifier.weight(1f),
+                    contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp)
+                ) {
+                    items(drawerItems) { (name, targetScreen, icon) ->
+                        NavigationDrawerItem(
+                            icon = { Icon(imageVector = icon, contentDescription = name) },
+                            label = { Text(name, fontWeight = FontWeight.SemiBold) },
+                            selected = currentView == targetScreen,
+                            onClick = {
+                                viewModel.navigateTo(targetScreen)
+                                scope.launch { drawerState.close() }
+                            },
+                            colors = NavigationDrawerItemDefaults.colors(
+                                selectedContainerColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.12f),
+                                selectedIconColor = MaterialTheme.colorScheme.primary,
+                                selectedTextColor = MaterialTheme.colorScheme.primary,
+                                unselectedContainerColor = Color.Transparent,
+                                unselectedIconColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
+                                unselectedTextColor = MaterialTheme.colorScheme.onSurface
+                            ),
+                            shape = RoundedCornerShape(16.dp),
+                            modifier = Modifier
+                                .padding(vertical = 4.dp)
+                                .testTag("menu_nav_${name.lowercase().replace(" ", "_")}")
+                        )
+                    }
+                }
+
+                // Decorative Rahul Shah credits
+                Text(
+                    text = "Developer Focus: Rahul Shah",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f),
+                    modifier = Modifier
+                        .padding(24.dp)
+                        .align(Alignment.CenterHorizontally)
+                )
+            }
+        }
+    ) {
+        Scaffold(
+            topBar = {
+                if (currentView != Screen.EDITOR && currentView != Screen.APPLY_PREVIEW) {
+                    TopAppBar(
+                        title = {
+                            Text(
+                                text = when (currentView) {
+                                    Screen.HOME -> "ELITEWALLS"
+                                    Screen.CATEGORIES -> "Categories"
+                                    Screen.LIVE_WALLPAPERS -> "Live Canvas"
+                                    Screen.SOUNDS -> "Sound Waves"
+                                    Screen.FAVORITES -> "Private Vault"
+                                    Screen.DOWNLOADS -> "Local Gallery"
+                                    Screen.UPLOAD_CENTER -> "Upload Studio"
+                                    Screen.CREATOR_DASHBOARD -> "Creator Hub"
+                                    Screen.SETTINGS -> "Dashboard Settings"
+                                    Screen.ABOUT -> "Project Elitewalls"
+                                    Screen.DETAIL -> "Aesthetic Canvas"
+                                    else -> "ELITEWALLS"
+                                },
+                                fontWeight = FontWeight.Black,
+                                letterSpacing = 1.sp,
+                                modifier = Modifier.testTag("app_bar_title")
+                            )
+                        },
+                        navigationIcon = {
+                            IconButton(
+                                onClick = { scope.launch { drawerState.open() } },
+                                modifier = Modifier.testTag("hamburger_icon_test")
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Menu,
+                                    contentDescription = "Hamburger menu button"
+                                )
+                            }
+                        },
+                        actions = {
+                            var showThemeMenu by remember { mutableStateOf(false) }
+                            IconButton(onClick = { showThemeMenu = true }) {
+                                Icon(
+                                    imageVector = Icons.Default.Palette,
+                                    contentDescription = "Change applet accent pastel palette"
+                                )
+                            }
+                            DropdownMenu(
+                                expanded = showThemeMenu,
+                                onDismissRequest = { showThemeMenu = false },
+                                modifier = Modifier.glassmorphic(cornerRadius = 16.dp)
+                            ) {
+                                AppThemeStyle.values().forEach { theme ->
+                                    DropdownMenuItem(
+                                        text = { Text(theme.name.replace("_", " ")) },
+                                        onClick = {
+                                            viewModel.activeTheme.value = theme
+                                            showThemeMenu = false
+                                        },
+                                        leadingIcon = {
+                                            Box(
+                                                modifier = Modifier
+                                                    .size(16.dp)
+                                                    .clip(CircleShape)
+                                                    .background(
+                                                        when (theme) {
+                                                            AppThemeStyle.LAVENDER -> Color(0xFFD1C4E9)
+                                                            AppThemeStyle.OCEAN_BLUE -> Color(0xFF90CAF9)
+                                                            AppThemeStyle.MINT_GREEN -> Color(0xFFA5D6A7)
+                                                            AppThemeStyle.PEACH -> Color(0xFFFFCC80)
+                                                            AppThemeStyle.SAKURA_PINK -> Color(0xFFF48FB1)
+                                                            AppThemeStyle.ARCTIC_WHITE -> Color(0xFFE0F7FA)
+                                                            AppThemeStyle.SUNSET_ORANGE -> Color(0xFFFFAB91)
+                                                            AppThemeStyle.DYNAMIC_ADAPTIVE -> MaterialTheme.colorScheme.primary
+                                                        }
+                                                    )
+                                            )
+                                        }
+                                    )
+                                }
+                            }
+
+                            // Dark / Light Toggle icon
+                            IconButton(onClick = { viewModel.isDarkMode.value = !darkValue }) {
+                                Icon(
+                                    imageVector = if (darkValue) Icons.Default.LightMode else Icons.Default.DarkMode,
+                                    contentDescription = "Dark mode toggle switch"
+                                )
+                            }
+                        },
+                        colors = TopAppBarDefaults.topAppBarColors(
+                            containerColor = Color.Transparent
+                        )
+                    )
+                }
+            },
+            bottomBar = {
+                if (currentView != Screen.EDITOR && currentView != Screen.APPLY_PREVIEW) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .navigationBarsPadding()
+                            .padding(horizontal = 16.dp, vertical = 8.dp)
+                            .testTag("app_bottom_bar")
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .glassmorphic(
+                                    backgroundColor = Color.White.copy(alpha = 0.05f),
+                                    borderColor = Color.White.copy(alpha = 0.1f),
+                                    cornerRadius = 32.dp
+                                )
+                                .padding(vertical = 10.dp, horizontal = 12.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            val bottomRoutes = listOf(
+                                Triple("Home", Screen.HOME, Icons.Default.Home),
+                                Triple("Live", Screen.LIVE_WALLPAPERS, Icons.Default.MovieFilter),
+                                Triple("Sounds", Screen.SOUNDS, Icons.Default.MusicNote),
+                                Triple("Vault", Screen.FAVORITES, Icons.Default.Favorite),
+                                Triple("Upload", Screen.UPLOAD_CENTER, Icons.Default.CloudUpload)
+                            )
+                            bottomRoutes.forEach { (name, screen, icon) ->
+                                val selected = currentView == screen
+                                Box(
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .clickable { viewModel.navigateTo(screen) }
+                                        .padding(vertical = 4.dp),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Column(
+                                        horizontalAlignment = Alignment.CenterHorizontally,
+                                        verticalArrangement = Arrangement.Center
+                                    ) {
+                                        Icon(
+                                            imageVector = icon,
+                                            contentDescription = name,
+                                            tint = if (selected) MaterialTheme.colorScheme.primary else Color.White.copy(alpha = 0.35f),
+                                            modifier = Modifier.size(24.dp)
+                                        )
+                                        Spacer(modifier = Modifier.height(3.dp))
+                                        Text(
+                                            text = name,
+                                            color = if (selected) MaterialTheme.colorScheme.primary else Color.White.copy(alpha = 0.4f),
+                                            fontSize = 9.sp,
+                                            fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+            floatingActionButton = {
+                if (currentView == Screen.HOME) {
+                    Box(
+                        modifier = Modifier
+                            .size(56.dp)
+                            .clip(RoundedCornerShape(16.dp))
+                            .background(
+                                brush = Brush.linearGradient(
+                                    colors = listOf(
+                                        Color(0xFFA78BFA), // violet-400
+                                        Color(0xFF4F46E5)  // indigo-600
+                                    )
+                                )
+                            )
+                            .clickable { viewModel.navigateTo(Screen.UPLOAD_CENTER) }
+                            .testTag("floating_upload_action"),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Add,
+                            contentDescription = "Add uploaded background",
+                            tint = Color.White,
+                            modifier = Modifier.size(28.dp)
+                        )
+                    }
+                }
+            },
+            containerColor = MaterialTheme.colorScheme.background,
+            modifier = Modifier.fillMaxSize()
+        ) { paddingValues ->
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(paddingValues)
+            ) {
+                val basePrimary = MaterialTheme.colorScheme.primary
+                val baseSecondary = MaterialTheme.colorScheme.secondary
+                // Background artistic gradient aura for fluid layout
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .drawBehind {
+                            drawCircle(
+                                brush = Brush.radialGradient(
+                                    colors = listOf(
+                                        basePrimary.copy(alpha = 0.12f),
+                                        Color.Transparent
+                                    )
+                                ),
+                                radius = 600.dp.toPx(),
+                                center = Offset(0f, 0f)
+                            )
+                            drawCircle(
+                                brush = Brush.radialGradient(
+                                    colors = listOf(
+                                        baseSecondary.copy(alpha = 0.08f),
+                                        Color.Transparent
+                                    )
+                                ),
+                                radius = 400.dp.toPx(),
+                                center = Offset(size.width, size.height * 0.8f)
+                            )
+                        }
+                )
+
+                AnimatedContent(
+                    targetState = currentView,
+                    transitionSpec = {
+                        slideInHorizontally(
+                            initialOffsetX = { 300 },
+                            animationSpec = spring(dampingRatio = Spring.DampingRatioLowBouncy, stiffness = Spring.StiffnessLow)
+                        ) + fadeIn(animationSpec = tween(220)) togetherWith
+                        slideOutHorizontally(
+                            targetOffsetX = { -300 },
+                            animationSpec = spring(stiffness = Spring.StiffnessMedium)
+                        ) + fadeOut(animationSpec = tween(120))
+                    }
+                ) { targetScreen ->
+                    when (targetScreen) {
+                        Screen.HOME -> HomeScreen(viewModel, wallpaperList)
+                        Screen.CATEGORIES -> CategoriesScreen(viewModel, wallpaperList)
+                        Screen.LIVE_WALLPAPERS -> LiveWallpapersScreen(viewModel, liveList)
+                        Screen.SOUNDS -> SoundsScreen(viewModel, soundsList)
+                        Screen.FAVORITES -> FavoritesScreen(viewModel, favoritesList, soundsList)
+                        Screen.DOWNLOADS -> DownloadsScreen(viewModel, downloadsList)
+                        Screen.UPLOAD_CENTER -> UploadCenterScreen(viewModel)
+                        Screen.CREATOR_DASHBOARD -> CreatorDashboardScreen(viewModel)
+                        Screen.SETTINGS -> SettingsScreen(viewModel)
+                        Screen.ABOUT -> AboutScreen()
+                        Screen.DETAIL -> DetailScreen(viewModel)
+                        Screen.EDITOR -> EditorScreen(viewModel)
+                        Screen.APPLY_PREVIEW -> ApplyPreviewScreen(viewModel)
+                    }
+                }
+            }
+        }
+    }
+}
+
+// ==================== HOME SCREEN ====================
+@Composable
+fun HomeScreen(viewModel: EcosystemViewModel, list: List<WallpaperItem>) {
+    val context = LocalContext.current
+    val searchTxt by viewModel.searchQuery.collectAsState()
+    val randomCarouselWps = remember(list) { list.shuffled().take(6) }
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState())
+            .padding(16.dp)
+    ) {
+        // Aesthetic Search bar
+        OutlinedTextField(
+            value = searchTxt,
+            onValueChange = { viewModel.searchQuery.value = it },
+            placeholder = { Text("Search 4K, Dark AMOLED, Cyberpunk backgrounds...") },
+            leadingIcon = { Icon(imageVector = Icons.Default.Search, contentDescription = "Search bar icon") },
+            trailingIcon = {
+                if (searchTxt.isNotEmpty()) {
+                    IconButton(onClick = { viewModel.searchQuery.value = "" }) {
+                        Icon(imageVector = Icons.Default.Close, contentDescription = "Clear search query")
+                    }
+                }
+            },
+            shape = RoundedCornerShape(24.dp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(bottom = 16.dp)
+                .testTag("home_search_bar"),
+            colors = TextFieldDefaults.colors(
+                focusedContainerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.5f),
+                unfocusedContainerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.3f)
+            )
+        )
+
+        val filteredItems = if (searchTxt.isBlank()) list else {
+            list.filter {
+                it.title.contains(searchTxt, ignoreCase = true) ||
+                        it.category.contains(searchTxt, ignoreCase = true) ||
+                        it.tags.contains(searchTxt, ignoreCase = true)
+            }
+        }
+
+        if (searchTxt.isNotBlank()) {
+            Text(
+                text = "Search Results (${filteredItems.size})",
+                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                modifier = Modifier.padding(bottom = 8.dp)
+            )
+            if (filteredItems.isEmpty()) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(32.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text("No backgrounds found matching \"$searchTxt\"")
+                }
+            } else {
+                LazyVerticalGrid(
+                    columns = GridCells.Fixed(2),
+                    modifier = Modifier.height(400.dp),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    items(filteredItems) { item ->
+                        WallpaperCard(item = item, onClick = { viewModel.showWallpaperDetail(item) })
+                    }
+                }
+            }
+            Spacer(modifier = Modifier.height(16.dp))
+        } else {
+            // Featured Hero Card (Editor's Choice) from design theme
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(200.dp)
+                    .clip(RoundedCornerShape(32.dp))
+                    .clickable {
+                        val nebulaWp = list.find { it.title.contains("Nebula", ignoreCase = true) } ?: list.firstOrNull()
+                        nebulaWp?.let { viewModel.showWallpaperDetail(it) }
+                    }
+                    .testTag("featured_hero_card")
+            ) {
+                AsyncImage(
+                    model = "https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?auto=format&fit=crop&q=80&w=800",
+                    contentDescription = "Deep Nebula",
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier.fillMaxSize()
+                )
+
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(
+                            brush = Brush.verticalGradient(
+                                colors = listOf(
+                                    Color.Black.copy(alpha = 0.1f),
+                                    Color.Black.copy(alpha = 0.4f),
+                                    Color.Black.copy(alpha = 0.85f)
+                                )
+                            )
+                        )
+                )
+
+                Column(
+                    modifier = Modifier
+                        .align(Alignment.BottomStart)
+                        .padding(start = 24.dp, bottom = 20.dp)
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .background(Color(0xFF8B5CF6).copy(alpha = 0.9f), RoundedCornerShape(100.dp))
+                            .padding(horizontal = 12.dp, vertical = 4.dp)
+                    ) {
+                        Text(
+                            text = "Editor's Choice",
+                            color = Color.White,
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Text(
+                        text = "Deep Nebula",
+                        color = Color.White,
+                        fontSize = 20.sp,
+                        fontWeight = FontWeight.Bold,
+                        letterSpacing = (-0.5).sp
+                    )
+                    Text(
+                        text = "By Rahul Shah • 4K Abstract",
+                        color = Color.White.copy(alpha = 0.75f),
+                        fontSize = 11.sp
+                    )
+                }
+
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.BottomEnd)
+                        .padding(end = 24.dp, bottom = 20.dp)
+                        .size(40.dp)
+                        .clip(CircleShape)
+                        .background(Color.White.copy(alpha = 0.2f))
+                        .border(1.dp, Color.White.copy(alpha = 0.3f), CircleShape)
+                        .clickable {
+                            val targetWp = list.find { it.title.contains("Nebula", ignoreCase = true) } ?: list.firstOrNull()
+                            targetWp?.let { viewModel.toggleLikeWallpaper(it) }
+                            Toast.makeText(context, "Added Deep Nebula to Private Vault!", Toast.LENGTH_SHORT).show()
+                        },
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Favorite,
+                        contentDescription = "Favorite Nebula",
+                        tint = Color.White,
+                        modifier = Modifier.size(20.dp)
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(20.dp))
+
+            // Interactive Glass Carousel
+            Text(
+                text = "Trending Spotlights",
+                style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Black),
+                modifier = Modifier.padding(bottom = 12.dp)
+            )
+
+            LazyRow(
+                horizontalArrangement = Arrangement.spacedBy(16.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(bottom = 24.dp)
+            ) {
+                items(randomCarouselWps) { wp ->
+                    Box(
+                        modifier = Modifier
+                            .width(180.dp)
+                            .height(260.dp)
+                            .clip(RoundedCornerShape(20.dp))
+                            .clickable { viewModel.showWallpaperDetail(wp) }
+                            .testTag("spotlight_card_${wp.id}")
+                    ) {
+                        AsyncImage(
+                            model = ImageRequest.Builder(LocalContext.current)
+                                .data(wp.url)
+                                .crossfade(true)
+                                .build(),
+                            contentDescription = wp.title,
+                            contentScale = ContentScale.Crop,
+                            modifier = Modifier.fillMaxSize()
+                        )
+
+                        // Translucent card tags
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .align(Alignment.BottomCenter)
+                                .background(Color.Black.copy(alpha = 0.5f))
+                                .padding(8.dp)
+                        ) {
+                            Column {
+                                Text(
+                                    text = wp.title,
+                                    color = Color.White,
+                                    style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Bold),
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                                Text(
+                                    text = wp.category,
+                                    color = MaterialTheme.colorScheme.primaryContainer,
+                                    style = MaterialTheme.typography.labelSmall
+                                )
+                            }
+                        }
+
+                        // Ultra High Def bubble
+                        Box(
+                            modifier = Modifier
+                                .align(Alignment.TopEnd)
+                                .padding(8.dp)
+                                .background(Color.Black.copy(alpha = 0.6f), RoundedCornerShape(12.dp))
+                                .padding(horizontal = 8.dp, vertical = 2.dp)
+                        ) {
+                            Text(wp.quality, color = Color.White, style = MaterialTheme.typography.labelSmall)
+                        }
+                    }
+                }
+            }
+
+            // Featured Creator Spotlight
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 12.dp),
+                shape = RoundedCornerShape(24.dp),
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f)
+                )
+            ) {
+                Row(
+                    modifier = Modifier.padding(16.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(56.dp)
+                            .clip(CircleShape)
+                            .border(2.dp, MaterialTheme.colorScheme.primary, CircleShape)
+                    ) {
+                        AsyncImage(
+                            model = "https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&q=80&w=120",
+                            contentDescription = "Rahul Shah Creator Avatar",
+                            modifier = Modifier.fillMaxSize()
+                        )
+                    }
+                    Spacer(modifier = Modifier.width(16.dp))
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "Featured Creator",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                        Text(
+                            text = "Rahul Shah",
+                            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
+                        )
+                        Text(
+                            text = "12.4K Downloads • Symmetrical compositions",
+                            style = MaterialTheme.typography.bodySmall
+                        )
+                    }
+                    Button(
+                        onClick = {
+                            viewModel.navigateTo(Screen.CREATOR_DASHBOARD)
+                            Toast.makeText(context, "Opened Rahul's Portal", Toast.LENGTH_SHORT).show()
+                        },
+                        shape = RoundedCornerShape(12.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
+                    ) {
+                        Text("View", fontSize = 12.sp)
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(12.dp))
+
+            // Recently Uploaded Grid Title
+            Text(
+                text = "Explore Masterworks",
+                style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Black),
+                modifier = Modifier.padding(bottom = 12.dp)
+            )
+
+            // Dynamic grid layout
+            val displayedWallpapers = list.take(10)
+            Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                val chunks = displayedWallpapers.chunked(2)
+                chunks.forEach { chunk ->
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(16.dp)
+                    ) {
+                        chunk.forEach { item ->
+                            Box(modifier = Modifier.weight(1f)) {
+                                WallpaperCard(item = item, onClick = { viewModel.showWallpaperDetail(item) })
+                            }
+                        }
+                        if (chunk.size < 2) {
+                            Spacer(modifier = Modifier.weight(1f))
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+// ==================== WALLPAPER CARD ====================
+@Composable
+fun WallpaperCard(item: WallpaperItem, onClick: () -> Unit) {
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(240.dp)
+            .clip(RoundedCornerShape(20.dp))
+            .clickable { onClick() }
+            .testTag("wallpaper_item_card_${item.id}"),
+        shape = RoundedCornerShape(20.dp),
+        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+    ) {
+        Box(modifier = Modifier.fillMaxSize()) {
+            AsyncImage(
+                model = ImageRequest.Builder(LocalContext.current)
+                    .data(item.url)
+                    .crossfade(true)
+                    .build(),
+                contentDescription = item.title,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.fillMaxSize()
+            )
+
+            // Overlay label
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .align(Alignment.BottomCenter)
+                    .background(Color.Black.copy(alpha = 0.5f))
+                    .padding(10.dp)
+            ) {
+                Row(
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = item.title,
+                            color = Color.White,
+                            style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                        Text(
+                            text = "by ${item.author}",
+                            color = Color.White.copy(alpha = 0.8f),
+                            style = MaterialTheme.typography.labelSmall
+                        )
+                    }
+                    Box(
+                        modifier = Modifier
+                            .background(MaterialTheme.colorScheme.primary, RoundedCornerShape(8.dp))
+                            .padding(horizontal = 6.dp, vertical = 2.dp)
+                    ) {
+                        Text(
+                            text = item.quality,
+                            fontSize = 8.sp,
+                            color = Color.White,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+// ==================== CATEGORIES SCREEN ====================
+@Composable
+fun CategoriesScreen(viewModel: EcosystemViewModel, allList: List<WallpaperItem>) {
+    val categories = listOf(
+        Pair("Minimal", "https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?auto=format&fit=crop&q=80&w=400"),
+        Pair("Nature", "https://images.unsplash.com/photo-1475924156734-496f6cac6ec1?auto=format&fit=crop&q=80&w=400"),
+        Pair("Anime", "https://images.unsplash.com/photo-1607604276583-eef5d076aa5f?auto=format&fit=crop&q=80&w=400"),
+        Pair("Gaming", "https://images.unsplash.com/photo-1612287230202-1bf1d85d1bdf?auto=format&fit=crop&q=80&w=400"),
+        Pair("Cars", "https://images.unsplash.com/photo-1580273916550-e323be2ae537?auto=format&fit=crop&q=80&w=400"),
+        Pair("Abstract", "https://images.unsplash.com/photo-1541701494587-cb58502866ab?auto=format&fit=crop&q=80&w=400"),
+        Pair("Cyberpunk", "https://images.unsplash.com/photo-1542838132-92c53300491e?auto=format&fit=crop&q=80&w=400"),
+        Pair("Aesthetic", "https://images.unsplash.com/photo-1518531933037-91b2f5f229cc?auto=format&fit=crop&q=80&w=400"),
+        Pair("Dark AMOLED", "https://images.unsplash.com/photo-1502134249126-9f3755a50d78?auto=format&fit=crop&q=80&w=400"),
+        Pair("Space", "https://images.unsplash.com/photo-1451187580459-43490279c0fa?auto=format&fit=crop&q=80&w=400"),
+        Pair("Technology", "https://images.unsplash.com/photo-1518770660439-4636190af475?auto=format&fit=crop&q=80&w=400"),
+        Pair("Photography", "https://images.unsplash.com/photo-1501183007986-d0d080b147f9?auto=format&fit=crop&q=80&w=400")
+    )
+
+    val activeCat by viewModel.selectedCategory.collectAsState()
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(16.dp)
+    ) {
+        // Tag Row Filter
+        LazyRow(
+            modifier = Modifier.padding(bottom = 16.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            item {
+                val selected = activeCat == "All"
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(16.dp))
+                        .background(if (selected) MaterialTheme.colorScheme.primary else Color.White.copy(alpha = 0.05f))
+                        .border(
+                            1.dp,
+                            if (selected) Color.Transparent else Color.White.copy(alpha = 0.1f),
+                            RoundedCornerShape(16.dp)
+                        )
+                        .clickable { viewModel.selectedCategory.value = "All" }
+                        .padding(horizontal = 20.dp, vertical = 10.dp)
+                ) {
+                    Text(
+                        text = "All Masterworks",
+                        color = if (selected) Color.White else Color(0xFFCBD5E1),
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Medium
+                    )
+                }
+            }
+            items(categories) { (name, _) ->
+                val selected = activeCat == name
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(16.dp))
+                        .background(if (selected) MaterialTheme.colorScheme.primary else Color.White.copy(alpha = 0.05f))
+                        .border(
+                            1.dp,
+                            if (selected) Color.Transparent else Color.White.copy(alpha = 0.1f),
+                            RoundedCornerShape(16.dp)
+                        )
+                        .clickable { viewModel.selectedCategory.value = name }
+                        .padding(horizontal = 20.dp, vertical = 10.dp)
+                ) {
+                    Text(
+                        text = name,
+                        color = if (selected) Color.White else Color(0xFFCBD5E1),
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Medium
+                    )
+                }
+            }
+        }
+
+        if (activeCat == "All") {
+            // Display all category poster cards
+            LazyVerticalGrid(
+                columns = GridCells.Fixed(2),
+                horizontalArrangement = Arrangement.spacedBy(16.dp),
+                verticalArrangement = Arrangement.spacedBy(16.dp),
+                modifier = Modifier.weight(1f)
+            ) {
+                items(categories) { (name, cover) ->
+                    Box(
+                        modifier = Modifier
+                            .height(130.dp)
+                            .clip(RoundedCornerShape(20.dp))
+                            .clickable { viewModel.selectedCategory.value = name }
+                            .testTag("category_cell_$name")
+                    ) {
+                        AsyncImage(
+                            model = cover,
+                            contentDescription = name,
+                            contentScale = ContentScale.Crop,
+                            modifier = Modifier.fillMaxSize()
+                        )
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .background(Color.Black.copy(alpha = 0.4f)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                text = name,
+                                color = Color.White,
+                                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
+                            )
+                        }
+                    }
+                }
+            }
+        } else {
+            // Filter list items
+            val filteredList = allList.filter { it.category.equals(activeCat, ignoreCase = true) }
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text("Category: $activeCat", style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Bold)
+                TextButton(onClick = { viewModel.selectedCategory.value = "All" }) {
+                    Text("Show Categories")
+                }
+            }
+
+            if (filteredList.isEmpty()) {
+                Box(modifier = Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
+                    Text("No backgrounds seeded for \"$activeCat\" group.")
+                }
+            } else {
+                LazyVerticalGrid(
+                    columns = GridCells.Fixed(2),
+                    modifier = Modifier.weight(1f),
+                    horizontalArrangement = Arrangement.spacedBy(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(16.dp)
+                ) {
+                    items(filteredList) { item ->
+                        WallpaperCard(item = item, onClick = { viewModel.showWallpaperDetail(item) })
+                    }
+                }
+            }
+        }
+    }
+}
+
+// ==================== LIVE WALLPAPERS SCREEN ====================
+@Composable
+fun LiveWallpapersScreen(viewModel: EcosystemViewModel, liveWps: List<WallpaperItem>) {
+    var playingId by remember { mutableStateOf<String?>(null) }
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(16.dp)
+    ) {
+        Card(
+            colors = CardDefaults.cardColors(
+                containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.2f)
+            ),
+            shape = RoundedCornerShape(20.dp),
+            modifier = Modifier.padding(bottom = 16.dp)
+        ) {
+            Row(modifier = Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                Icon(
+                    imageVector = Icons.Default.MovieFilter,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(32.dp)
+                )
+                Spacer(modifier = Modifier.width(16.dp))
+                Column {
+                    Text("Synchronous Live Wallpapers", fontWeight = FontWeight.Bold)
+                    Text("Liquid loops play instantly matching high frame-rate rendering", style = MaterialTheme.typography.labelSmall)
+                }
+            }
+        }
+
+        LazyVerticalGrid(
+            columns = GridCells.Fixed(2),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+            modifier = Modifier.weight(1f)
+        ) {
+            items(liveWps) { wp ->
+                Box(
+                    modifier = Modifier
+                        .height(280.dp)
+                        .clip(RoundedCornerShape(24.dp))
+                        .clickable { viewModel.showWallpaperDetail(wp) }
+                        .testTag("live_canvas_wp_${wp.id}")
+                ) {
+                    AsyncImage(
+                        model = wp.url,
+                        contentDescription = wp.title,
+                        contentScale = ContentScale.Crop,
+                        modifier = Modifier.fillMaxSize()
+                    )
+
+                    // Wave Play indicator
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .background(if (playingId == wp.id) Color.Black.copy(alpha = 0.3f) else Color.Transparent)
+                    )
+
+                    IconButton(
+                        onClick = {
+                            playingId = if (playingId == wp.id) null else wp.id
+                            if (playingId != null) {
+                                Toast.makeText(viewModel.getApplication(), "Playing synced video loop & ambient track!", Toast.LENGTH_SHORT).show()
+                            }
+                        },
+                        modifier = Modifier
+                            .align(Alignment.Center)
+                            .background(Color.Black.copy(alpha = 0.6f), CircleShape)
+                    ) {
+                        Icon(
+                            imageVector = if (playingId == wp.id) Icons.Default.Pause else Icons.Default.PlayArrow,
+                            contentDescription = "Simulate active video playback",
+                            tint = Color.White
+                        )
+                    }
+
+                    Box(
+                        modifier = Modifier
+                            .align(Alignment.BottomCenter)
+                            .fillMaxWidth()
+                            .background(Color.Black.copy(alpha = 0.6f))
+                            .padding(8.dp)
+                    ) {
+                        Column {
+                            Text(wp.title, color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold, maxLines = 1)
+                            Text("🎥 Interactive Wave Loop", color = MaterialTheme.colorScheme.primaryContainer, fontSize = 9.sp)
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+// ==================== SOUNDS SCREEN ====================
+@Composable
+fun SoundsScreen(viewModel: EcosystemViewModel, sounds: List<SoundItem>) {
+    var selectedTab by remember { mutableStateOf("All") }
+    val playSoundId by viewModel.playActiveSoundId.collectAsState()
+
+    var showTrimmer by remember { mutableStateOf<SoundItem?>(null) }
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(16.dp)
+    ) {
+        // Tab Headers
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(bottom = 12.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            val tabs = listOf("All", "Ringtone", "Meme", "Sound Effect", "Ambient")
+            tabs.forEach { tab ->
+                FilterChip(
+                    selected = selectedTab == tab,
+                    onClick = { selectedTab = tab },
+                    label = { Text(tab, fontSize = 12.sp) }
+                )
+            }
+        }
+
+        val filteredSounds = if (selectedTab == "All") sounds else {
+            sounds.filter { it.category == selectedTab }
+        }
+
+        LazyColumn(
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+            modifier = Modifier.weight(1f)
+        ) {
+            items(filteredSounds) { item ->
+                val isPlaying = playSoundId == item.id
+                Card(
+                    shape = RoundedCornerShape(20.dp),
+                    colors = CardDefaults.cardColors(
+                        containerColor = if (isPlaying) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.4f)
+                        else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+                    ),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("sound_effect_${item.id}")
+                ) {
+                    Column(modifier = Modifier.padding(14.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            IconButton(
+                                onClick = { viewModel.togglePlaySound(item) },
+                                modifier = Modifier.background(MaterialTheme.colorScheme.primary, CircleShape)
+                            ) {
+                                Icon(
+                                    imageVector = if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
+                                    contentDescription = "Trigger play/pause icon for sound clip",
+                                    tint = Color.White
+                                )
+                            }
+                            Spacer(modifier = Modifier.width(14.dp))
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(item.title, fontWeight = FontWeight.Bold, maxLines = 1)
+                                Text("${item.artist} • ${item.category}", style = MaterialTheme.typography.labelSmall)
+                            }
+                            IconButton(onClick = { viewModel.toggleLikeSound(item) }) {
+                                Icon(
+                                    imageVector = if (item.isLiked) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
+                                    contentDescription = "Like item icon",
+                                    tint = if (item.isLiked) Color.Red else LocalContentColor.current
+                                )
+                            }
+                            IconButton(onClick = { viewModel.toggleBookmarkSound(item) }) {
+                                Icon(
+                                    imageVector = if (item.isBookmarked) Icons.Default.Bookmark else Icons.Default.BookmarkBorder,
+                                    contentDescription = "Bookmark item icon"
+                                )
+                            }
+                        }
+
+                        // Play Waves simulation
+                        if (isPlaying) {
+                            Spacer(modifier = Modifier.height(10.dp))
+                            SoundWaveformsIndicator()
+                        }
+
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(item.durationText, style = MaterialTheme.typography.bodySmall)
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                OutlinedButton(
+                                    onClick = { showTrimmer = item },
+                                    shape = RoundedCornerShape(10.dp)
+                                ) {
+                                    Icon(imageVector = Icons.Default.ContentCut, contentDescription = null, modifier = Modifier.size(12.dp))
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text("Trim Clip", fontSize = 11.sp)
+                                }
+                                Button(
+                                    onClick = {
+                                        viewModel.toggleBookmarkSound(item)
+                                        Toast.makeText(viewModel.getApplication(), "Sound clip \"${item.title}\" saved locally!", Toast.LENGTH_SHORT).show()
+                                    },
+                                    shape = RoundedCornerShape(10.dp)
+                                ) {
+                                    Icon(imageVector = Icons.Default.Download, contentDescription = null, modifier = Modifier.size(12.dp))
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text("Apply", fontSize = 11.sp)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Expanded Bottom Sheet Audio Trimmer Drawer
+        showTrimmer?.let { activeItem ->
+            AlertDialog(
+                onDismissRequest = { showTrimmer = null },
+                confirmButton = {
+                    Button(onClick = {
+                        viewModel.trimActiveAudioClip()
+                        showTrimmer = null
+                    }) {
+                        Text("Save and Apply")
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = { showTrimmer = null }) {
+                        Text("Discard")
+                    }
+                },
+                title = { Text("Audio Trimmer: ${activeItem.title}") },
+                text = {
+                    val trimS by viewModel.trimProgressStart.collectAsState()
+                    val trimE by viewModel.trimProgressEnd.collectAsState()
+
+                    Column {
+                        Text("Drag edges to choose ringtone range", fontSize = 12.sp)
+                        Spacer(modifier = Modifier.height(16.dp))
+
+                        // Visual track
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(60.dp)
+                                .background(Color.Black.copy(alpha = 0.08f), RoundedCornerShape(12.dp))
+                                .border(1.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(12.dp))
+                        ) {
+                            // Trim overlay highlight
+                            val highlightStart = trimS
+                            val highlightEnd = trimE
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxHeight()
+                                    .fillMaxWidth(highlightEnd - highlightStart)
+                                    .offset(x = (trimS * 200).dp)
+                                    .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.24f))
+                            )
+
+                            // Synthetic waveform
+                            Row(
+                                modifier = Modifier.fillMaxSize().padding(horizontal = 12.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                repeat(20) { index ->
+                                    val heightFactor = remember { (20..50).random() }
+                                    Box(
+                                        modifier = Modifier
+                                            .width(4.dp)
+                                            .height(heightFactor.dp)
+                                            .background(
+                                                if (index / 20f >= trimS && index / 20f <= trimE)
+                                                    MaterialTheme.colorScheme.primary
+                                                else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.3f),
+                                                RoundedCornerShape(2.dp)
+                                            )
+                                    )
+                                }
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.height(16.dp))
+                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                            Column {
+                                Text("Start Offset", style = MaterialTheme.typography.labelSmall)
+                                Slider(
+                                    value = trimS,
+                                    onValueChange = { if (it < trimE - 0.1f) viewModel.trimProgressStart.value = it },
+                                    modifier = Modifier.width(110.dp)
+                                )
+                            }
+                            Column {
+                                Text("End Limit", style = MaterialTheme.typography.labelSmall)
+                                Slider(
+                                    value = trimE,
+                                    onValueChange = { if (it > trimS + 0.1f) viewModel.trimProgressEnd.value = it },
+                                    modifier = Modifier.width(110.dp)
+                                )
+                            }
+                        }
+                    }
+                },
+                shape = RoundedCornerShape(24.dp)
+            )
+        }
+    }
+}
+
+@Composable
+fun SoundWaveformsIndicator() {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(24.dp),
+        horizontalArrangement = Arrangement.spacedBy(3.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        val infiniteTransition = rememberInfiniteTransition(label = "audio_wave")
+        repeat(34) { i ->
+            val scale by infiniteTransition.animateFloat(
+                initialValue = 0.2f,
+                targetValue = 1.0f,
+                animationSpec = infiniteRepeatable(
+                    animation = tween(durationMillis = (300..900).random(), easing = FastOutSlowInEasing),
+                    repeatMode = RepeatMode.Reverse
+                ),
+                label = "wave_scale_$i"
+            )
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxHeight(scale)
+                    .background(MaterialTheme.colorScheme.primary, RoundedCornerShape(2.dp))
+            )
+        }
+    }
+}
+
+// ==================== FAVORITES SCREEN ====================
+@Composable
+fun FavoritesScreen(viewModel: EcosystemViewModel, wallFav: List<WallpaperItem>, soundFav: List<SoundItem>) {
+    var screenState by remember { mutableStateOf(0) } // 0: Wallpapers, 1: Audios
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(16.dp)
+    ) {
+        TabRow(selectedTabIndex = screenState, modifier = Modifier.padding(bottom = 16.dp)) {
+            Tab(selected = screenState == 0, onClick = { screenState = 0 }) {
+                Text("Wallpapers (${wallFav.size})", modifier = Modifier.padding(12.dp))
+            }
+            Tab(selected = screenState == 1, onClick = { screenState = 1 }) {
+                Text("Sound clips (${soundFav.size})", modifier = Modifier.padding(12.dp))
+            }
+        }
+
+        if (screenState == 0) {
+            if (wallFav.isEmpty()) {
+                Box(modifier = Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
+                    Text("Your Vault is empty. Like premium canvases to secure offline bookmarks.")
+                }
+            } else {
+                LazyVerticalGrid(
+                    columns = GridCells.Fixed(2),
+                    horizontalArrangement = Arrangement.spacedBy(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(16.dp),
+                    modifier = Modifier.weight(1f)
+                ) {
+                    items(wallFav) { item ->
+                        WallpaperCard(item = item, onClick = { viewModel.showWallpaperDetail(item) })
+                    }
+                }
+            }
+        } else {
+            val favoritedSounds = soundFav.filter { it.isLiked || it.isBookmarked }
+            if (favoritedSounds.isEmpty()) {
+                Box(modifier = Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
+                    Text("No saved soundboards or custom ringtones.")
+                }
+            } else {
+                LazyColumn(
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                    modifier = Modifier.weight(1f)
+                ) {
+                    items(favoritedSounds) { item ->
+                        SoundsScreen(viewModel, listOf(item))
+                    }
+                }
+            }
+        }
+    }
+}
+
+// ==================== DOWNLOADS SCREEN ====================
+@Composable
+fun DownloadsScreen(viewModel: EcosystemViewModel, localList: List<WallpaperItem>) {
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(16.dp)
+    ) {
+        Text(
+            text = "Offline Canvas Crypt",
+            style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
+            modifier = Modifier.padding(bottom = 8.dp)
+        )
+        Text(
+            "These backgrounds are completely stored in your local sandbox cache and can be applied during network blackouts",
+            style = MaterialTheme.typography.bodySmall,
+            modifier = Modifier.padding(bottom = 16.dp)
+        )
+
+        if (localList.isEmpty()) {
+            Box(modifier = Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
+                Text("No downloaded themes in sandbox gallery yet!")
+            }
+        } else {
+            LazyVerticalGrid(
+                columns = GridCells.Fixed(2),
+                horizontalArrangement = Arrangement.spacedBy(16.dp),
+                verticalArrangement = Arrangement.spacedBy(16.dp),
+                modifier = Modifier.weight(1f)
+            ) {
+                items(localList) { item ->
+                    WallpaperCard(item = item, onClick = { viewModel.showWallpaperDetail(item) })
+                }
+            }
+        }
+    }
+}
+
+// ==================== UPLOAD CENTER SCREEN ====================
+@Composable
+fun UploadCenterScreen(viewModel: EcosystemViewModel) {
+    val context = LocalContext.current
+    var uploadTitle by remember { mutableStateOf("") }
+    var uploadCategory by remember { mutableStateOf("Minimal") }
+    var uploadWidth by remember { mutableStateOf("3840") }
+    var uploadHeight by remember { mutableStateOf("2160") }
+    var uploadTags by remember { mutableStateOf("minimal, ultra, clean") }
+    var uploadUrl by remember { mutableStateOf("") }
+    var uploadIsLive by remember { mutableStateOf(false) }
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState())
+            .padding(16.dp)
+    ) {
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(24.dp),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
+        ) {
+            Column(modifier = Modifier.padding(20.dp)) {
+                Text(
+                    text = "Consolidated Upload Portal",
+                    style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
+                    modifier = Modifier.padding(bottom = 8.dp)
+                )
+                Text(
+                    text = "Elitewalls runs integrated quality assurance scans. Images under 1080p are programmatically rejected to preserve display fidelity.",
+                    style = MaterialTheme.typography.bodySmall,
+                    modifier = Modifier.padding(bottom = 16.dp)
+                )
+
+                OutlinedTextField(
+                    value = uploadTitle,
+                    onValueChange = { uploadTitle = it },
+                    label = { Text("Creation Title") },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(bottom = 12.dp)
+                        .testTag("upload_title_input")
+                )
+
+                Text("Wallpaper Group Category", style = MaterialTheme.typography.labelMedium)
+                var dropdownExpanded by remember { mutableStateOf(false) }
+                Box {
+                    Button(
+                        onClick = { dropdownExpanded = true },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(bottom = 12.dp)
+                            .testTag("upload_category_trigger")
+                    ) {
+                        Text(uploadCategory)
+                    }
+                    DropdownMenu(expanded = dropdownExpanded, onDismissRequest = { dropdownExpanded = false }) {
+                        val categories = listOf("Minimal", "Nature", "Anime", "Gaming", "Cars", "Abstract", "Cyberpunk", "Aesthetic", "Dark AMOLED", "Space", "Technology", "Photography")
+                        categories.forEach { cat ->
+                            DropdownMenuItem(text = { Text(cat) }, onClick = {
+                                uploadCategory = cat
+                                dropdownExpanded = false
+                            })
+                        }
+                    }
+                }
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    OutlinedTextField(
+                        value = uploadWidth,
+                        onValueChange = { uploadWidth = it },
+                        label = { Text("Width (px)") },
+                        modifier = Modifier.weight(1f).testTag("upload_width_input")
+                    )
+                    OutlinedTextField(
+                        value = uploadHeight,
+                        onValueChange = { uploadHeight = it },
+                        label = { Text("Height (px)") },
+                        modifier = Modifier.weight(1f).testTag("upload_height_input")
+                    )
+                }
+                Spacer(modifier = Modifier.height(12.dp))
+
+                OutlinedTextField(
+                    value = uploadTags,
+                    onValueChange = { uploadTags = it },
+                    label = { Text("Tags / Hashtags") },
+                    modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp)
+                )
+
+                OutlinedTextField(
+                    value = uploadUrl,
+                    onValueChange = { uploadUrl = it },
+                    label = { Text("Direct High-Res Image Link") },
+                    placeholder = { Text("E.g. Unsplash hotlink") },
+                    modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp)
+                )
+
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(bottom = 16.dp)
+                ) {
+                    Checkbox(checked = uploadIsLive, onCheckedChange = { uploadIsLive = it })
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("Identify as looping Live Background (Video link)")
+                }
+
+                Button(
+                    onClick = {
+                        val widthVal = uploadWidth.toIntOrNull() ?: 0
+                        val heightVal = uploadHeight.toIntOrNull() ?: 0
+                        if (uploadTitle.isBlank()) {
+                            Toast.makeText(context, "Failure: Please define building artwork title", Toast.LENGTH_SHORT).show()
+                            return@Button
+                        }
+                        val success = viewModel.analyzeAndValidateUpload(
+                            title = uploadTitle,
+                            category = uploadCategory,
+                            width = widthVal,
+                            height = heightVal,
+                            tags = uploadTags,
+                            url = uploadUrl,
+                            isLive = uploadIsLive,
+                            videoUrl = if (uploadIsLive) "https://assets.mixkit.co/videos/preview/mixkit-star-trails-glowing-in-the-night-sky-40292-large.mp4" else null
+                        )
+                        if (success) {
+                            // Reset inputs
+                            uploadTitle = ""
+                            uploadUrl = ""
+                            viewModel.navigateTo(Screen.HOME)
+                        }
+                    },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(54.dp)
+                        .testTag("submit_artwork_upload"),
+                    shape = RoundedCornerShape(16.dp)
+                ) {
+                    Text("Execute QA Check & Distribute")
+                }
+            }
+        }
+    }
+}
+
+// ==================== CREATOR DASHBOARD ====================
+@Composable
+fun CreatorDashboardScreen(viewModel: EcosystemViewModel) {
+    val stats by viewModel.creatorStats.collectAsState()
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState())
+            .padding(16.dp)
+    ) {
+        Card(
+            shape = RoundedCornerShape(28.dp),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)),
+            modifier = Modifier.padding(bottom = 20.dp)
+        ) {
+            Column(modifier = Modifier.padding(20.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Box(modifier = Modifier.size(64.dp).clip(CircleShape)) {
+                        AsyncImage(model = "https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&q=80&w=120", contentDescription = null)
+                    }
+                    Spacer(modifier = Modifier.width(16.dp))
+                    Column {
+                        Text("Rahul Shah", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                        Text("Supreme Media Curator", style = MaterialTheme.typography.labelSmall)
+                        Text("Quality Assurance Level: Gold Verified", color = MaterialTheme.colorScheme.primary, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                    }
+                }
+            }
+        }
+
+        Text("Corporate Upload Analytics", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Black, modifier = Modifier.padding(bottom = 12.dp))
+
+        // Matrix Stats card
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(bottom = 20.dp),
+            horizontalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Card(modifier = Modifier.weight(1f).height(100.dp), shape = RoundedCornerShape(16.dp)) {
+                Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.Center) {
+                    Text("Total Uploads", style = MaterialTheme.typography.labelSmall)
+                    Text("${stats.totalUploads}", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                    Text("QA 100% Ok", color = Color(0xFF4CAF50), fontSize = 10.sp)
+                }
+            }
+            Card(modifier = Modifier.weight(1f).height(100.dp), shape = RoundedCornerShape(16.dp)) {
+                Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.Center) {
+                    Text("Global Downloads", style = MaterialTheme.typography.labelSmall)
+                    Text("${stats.totalDownloads}", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                    Text("+560 today", color = MaterialTheme.colorScheme.primary, fontSize = 10.sp)
+                }
+            }
+        }
+
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(bottom = 24.dp),
+            horizontalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Card(modifier = Modifier.weight(1f).height(100.dp), shape = RoundedCornerShape(16.dp)) {
+                Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.Center) {
+                    Text("Ecosystem Fans", style = MaterialTheme.typography.labelSmall)
+                    Text("${stats.followersCount}", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                    Text("Top 2% Creator", color = MaterialTheme.colorScheme.primary, fontSize = 10.sp)
+                }
+            }
+            Card(modifier = Modifier.weight(1f).height(100.dp), shape = RoundedCornerShape(16.dp)) {
+                Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.Center) {
+                    Text("Aesthetic Rating", style = MaterialTheme.typography.labelSmall)
+                    Text("${stats.averageQualityScore}/10.0", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                    Text("Ultra Premium", color = Color(0xFFFF9800), fontSize = 10.sp)
+                }
+            }
+        }
+
+        // Custom Analytics Bar Chart in Jetpack Compose Canvas
+        Card(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(200.dp),
+            shape = RoundedCornerShape(24.dp)
+        ) {
+            Column(modifier = Modifier.padding(16.dp)) {
+                Text("Weekly Download Acceleration", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                Spacer(modifier = Modifier.height(16.dp))
+                Row(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(bottom = 8.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.Bottom
+                ) {
+                    val scaleValues = listOf(0.4f, 0.6f, 0.5f, 0.9f, 0.7f, 1.0f, 0.8f)
+                    val days = listOf("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
+
+                    scaleValues.forEachIndexed { idx, value ->
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Box(
+                                modifier = Modifier
+                                    .width(22.dp)
+                                    .fillMaxHeight(0.7f * value)
+                                    .background(
+                                        Brush.verticalGradient(
+                                            listOf(
+                                                MaterialTheme.colorScheme.primary,
+                                                MaterialTheme.colorScheme.secondary
+                                            )
+                                        ),
+                                        RoundedCornerShape(6.dp)
+                                    )
+                            )
+                            Spacer(modifier = Modifier.height(6.dp))
+                            Text(days[idx], fontSize = 10.sp)
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+// ==================== SETTINGS SCREEN ====================
+@Composable
+fun SettingsScreen(viewModel: EcosystemViewModel) {
+    val amoledValue by viewModel.isAmoledMode.collectAsState()
+    val isSlideshow by viewModel.isSlideshowActive.collectAsState()
+    val cacheVal by viewModel.cacheSizeMb.collectAsState()
+
+    var autoChangeFreq by remember { mutableStateOf(2) } // Hours
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState())
+            .padding(16.dp)
+    ) {
+        Text("System Preferences & Optimisation", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, modifier = Modifier.padding(bottom = 4.dp))
+        Text("Fine tune battery, caching, and auto scheduler options", style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(bottom = 20.dp))
+
+        // Card list
+        Card(shape = RoundedCornerShape(24.dp), modifier = Modifier.fillMaxWidth()) {
+            Column(modifier = Modifier.padding(16.dp)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("True AMOLED Pitch-Black Mode", fontWeight = FontWeight.Bold)
+                        Text("Overwrites canvas backgrounds with solid #000000 to maximize contrast on OLED panels.", style = MaterialTheme.typography.bodySmall)
+                    }
+                    Switch(checked = amoledValue, onCheckedChange = { viewModel.isAmoledMode.value = it })
+                }
+                Spacer(modifier = Modifier.height(18.dp))
+                Divider(color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f))
+                Spacer(modifier = Modifier.height(18.dp))
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("Interactive Slideshow Loop", fontWeight = FontWeight.Bold)
+                        Text("Auto rotates chosen spotlights every 4 seconds dynamically.", style = MaterialTheme.typography.bodySmall)
+                    }
+                    Switch(checked = isSlideshow, onCheckedChange = { viewModel.toggleSlideshow() })
+                }
+
+                Spacer(modifier = Modifier.height(18.dp))
+                Divider(color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f))
+                Spacer(modifier = Modifier.height(18.dp))
+
+                Column {
+                    Text("Auto Wallpaper Cycle Frequency", fontWeight = FontWeight.Bold)
+                    Text("Trigger automatic rotation behind scenes in the system wallpaper client", style = MaterialTheme.typography.bodySmall)
+                    Slider(
+                        value = autoChangeFreq.toFloat(),
+                        onValueChange = { autoChangeFreq = it.toInt() },
+                        valueRange = 1f..24f,
+                        steps = 22
+                    )
+                    Text("Triggers background refresh every $autoChangeFreq hours", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
+                }
+
+                Spacer(modifier = Modifier.height(18.dp))
+                Divider(color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f))
+                Spacer(modifier = Modifier.height(18.dp))
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column {
+                        Text("Purge Image Sandbox Cache", fontWeight = FontWeight.Bold)
+                        Text("Active usage: ${String.format("%.1f", cacheVal)} MB storage consumed", style = MaterialTheme.typography.bodySmall)
+                    }
+                    Button(
+                        onClick = { viewModel.clearCache() },
+                        enabled = cacheVal > 0f,
+                        shape = RoundedCornerShape(12.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
+                    ) {
+                        Text("Dry-Purge")
+                    }
+                }
+            }
+        }
+    }
+}
+
+// ==================== ABOUT SCREEN ====================
+@Composable
+fun AboutScreen() {
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState())
+            .padding(16.dp)
+    ) {
+        Card(shape = RoundedCornerShape(24.dp), modifier = Modifier.fillMaxWidth()) {
+            Column(modifier = Modifier.padding(20.dp)) {
+                Text("Project Elitewalls", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, modifier = Modifier.padding(bottom = 8.dp))
+                Text(
+                    text = "A luxury-level Material 3 high-definition wallpaper platform and audio synthesis customizer designed specifically for Android 12+ devices.",
+                    style = MaterialTheme.typography.bodyMedium
+                )
+                Spacer(modifier = Modifier.height(16.dp))
+                Text("Platform Terms of Distribution:", fontWeight = FontWeight.Bold)
+                Text("All vectors, loop videos, and ambient ringtones seeded are royalty-free in respect of creators globally.", style = MaterialTheme.typography.bodySmall)
+            }
+        }
+
+        Spacer(modifier = Modifier.height(24.dp))
+
+        // Animated Credits Section "Made with love by Rahul Shah"
+        AnimatedDeveloperCredits()
+    }
+}
+
+@Composable
+fun AnimatedDeveloperCredits() {
+    val infiniteTransition = rememberInfiniteTransition(label = "credits_glow")
+    val alphaAnim by infiniteTransition.animateFloat(
+        initialValue = 0.5f,
+        targetValue = 1.0f,
+        animationSpec = infiniteRepeatable(tween(1400, easing = LinearEasing), RepeatMode.Reverse),
+        label = "alpha"
+    )
+    val scaleAnim by infiniteTransition.animateFloat(
+        initialValue = 0.96f,
+        targetValue = 1.04f,
+        animationSpec = infiniteRepeatable(tween(2000, easing = FastOutSlowInEasing), RepeatMode.Reverse),
+        label = "scale"
+    )
+
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .graphicsLayer(scaleX = scaleAnim, scaleY = scaleAnim)
+            .blur(if (alphaAnim < 0.6f) 0.5.dp else 0.0.dp)
+            .background(
+                brush = Brush.linearGradient(
+                    colors = listOf(
+                        MaterialTheme.colorScheme.primary.copy(alpha = alphaAnim),
+                        MaterialTheme.colorScheme.secondary.copy(alpha = alphaAnim)
+                    )
+                ),
+                shape = RoundedCornerShape(24.dp)
+            )
+            .padding(2.dp)
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(MaterialTheme.colorScheme.background, RoundedCornerShape(22.dp))
+                .padding(24.dp),
+            contentAlignment = Alignment.Center
+        ) {
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Icon(
+                    imageVector = Icons.Default.Favorite,
+                    contentDescription = "Pulse red vector heart detailing love",
+                    tint = Color.Red,
+                    modifier = Modifier
+                        .size(36.dp)
+                        .graphicsLayer(scaleX = scaleAnim, scaleY = scaleAnim)
+                )
+                Spacer(modifier = Modifier.height(12.dp))
+                Text(
+                    text = "Made with love",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.8f)
+                )
+                Text(
+                    text = "Rahul Shah",
+                    style = MaterialTheme.typography.headlineMedium.copy(
+                        fontFamily = FontFamily.Serif,
+                        fontWeight = FontWeight.Black,
+                        letterSpacing = 2.sp
+                    ),
+                    color = MaterialTheme.colorScheme.primary,
+                    textAlign = TextAlign.Center
+                )
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    text = "Premium Digital Platform Architect",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
+                )
+            }
+        }
+    }
+}
+
+// ==================== DETAIL SCREEN ====================
+@Composable
+fun DetailScreen(viewModel: EcosystemViewModel) {
+    val wp by viewModel.selectedWallpaper.collectAsState()
+    val isLiked = wp?.isLiked ?: false
+    val isBookmarked = wp?.isBookmarked ?: false
+
+    val analyzing by viewModel.aiAnalyzing.collectAsState()
+    val analysisResult by viewModel.aiAnalysisResult.collectAsState()
+
+    wp?.let { item ->
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .verticalScroll(rememberScrollState())
+                .padding(16.dp)
+        ) {
+            // Interactive Hero Card
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(460.dp)
+                    .clip(RoundedCornerShape(24.dp))
+                    .testTag("detail_hero_canvas")
+            ) {
+                AsyncImage(
+                    model = ImageRequest.Builder(LocalContext.current)
+                        .data(item.url)
+                        .crossfade(true)
+                        .build(),
+                    contentDescription = item.title,
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier.fillMaxSize()
+                )
+
+                // Translucent Actions Overlay
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .align(Alignment.BottomCenter)
+                        .background(Color.Black.copy(alpha = 0.45f))
+                        .padding(16.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(item.title, color = Color.White, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, maxLines = 1)
+                            Text("by ${item.author} • ${item.category}", color = Color.White.copy(alpha = 0.8f), style = MaterialTheme.typography.bodySmall)
+                        }
+                        Row {
+                            IconButton(onClick = { viewModel.toggleLikeWallpaper(item) }) {
+                                Icon(
+                                    imageVector = if (isLiked) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
+                                    contentDescription = "Like background trigger toggle",
+                                    tint = if (isLiked) Color.Red else Color.White
+                                )
+                            }
+                            IconButton(onClick = { viewModel.toggleBookmarkWallpaper(item) }) {
+                                Icon(
+                                    imageVector = if (isBookmarked) Icons.Default.Bookmark else Icons.Default.BookmarkBorder,
+                                    contentDescription = "Bookmark background trigger toggle",
+                                    tint = if (isBookmarked) MaterialTheme.colorScheme.primary else Color.White
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(18.dp))
+
+            // Action sheet
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                Button(
+                    onClick = { viewModel.openApplyPreview() },
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(52.dp)
+                        .testTag("quick_apply_action"),
+                    shape = RoundedCornerShape(16.dp)
+                ) {
+                    Icon(imageVector = Icons.Default.Wallpaper, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("Set Wallpaper")
+                }
+
+                OutlinedButton(
+                    onClick = { viewModel.openEditorForActive() },
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(52.dp)
+                        .testTag("open_editor_action"),
+                    shape = RoundedCornerShape(16.dp)
+                ) {
+                    Icon(imageVector = Icons.Default.Edit, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("Tweak Editor")
+                }
+            }
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            // AI Quality Analyzer Box
+            Card(
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.3f)
+                ),
+                shape = RoundedCornerShape(20.dp)
+            ) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Box(
+                            modifier = Modifier
+                                .size(36.dp)
+                                .clip(CircleShape)
+                                .background(MaterialTheme.colorScheme.primary),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(imageVector = Icons.Default.AutoAwesome, contentDescription = null, tint = Color.White)
+                        }
+                        Spacer(modifier = Modifier.width(12.dp))
+                        Text("AI Aesthetic Quality Analyzer", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                    }
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Text("Trigger real-time neural diagnostics mapping color distribution, sharpness vector scores, and recommended adjustments.", style = MaterialTheme.typography.bodySmall)
+                    Spacer(modifier = Modifier.height(16.dp))
+
+                    if (analyzing) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            CircularProgressIndicator(modifier = Modifier.size(20.dp))
+                            Spacer(modifier = Modifier.width(12.dp))
+                            Text("Querying Gemini API for visual diagnostic report...", fontSize = 12.sp)
+                        }
+                    } else if (analysisResult != null) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.6f), RoundedCornerShape(12.dp))
+                                .padding(12.dp)
+                        ) {
+                            Text(analysisResult!!, fontSize = 11.sp, fontFamily = FontFamily.Monospace)
+                        }
+                    } else {
+                        Button(
+                            onClick = { viewModel.runAiQualityAnalyzer() },
+                            shape = RoundedCornerShape(12.dp)
+                        ) {
+                            Text("Launch QA Analysis")
+                        }
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            // More properties
+            Card(shape = RoundedCornerShape(20.dp), modifier = Modifier.fillMaxWidth()) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Text("Technical Assets", fontWeight = FontWeight.Bold)
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text("Resolution Class: ${item.quality} (${item.width} x ${item.height} pixels)")
+                    Text("Author Profile: ${item.author}")
+                    Text("Storage Stamp: ${(item.timestamp.rem(100).coerceAtLeast(10)) / 10f} MB compressed")
+                    Text("Telemetry: ${item.downloadsCount} Downloads • ${item.likesCount} Liked")
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text("Tags: ${item.tags}", color = MaterialTheme.colorScheme.primary, fontSize = 12.sp)
+                }
+            }
+        }
+    }
+}
+
+// ==================== EDITOR SCREEN ====================
+@Composable
+fun EditorScreen(viewModel: EcosystemViewModel) {
+    val wp by viewModel.selectedWallpaper.collectAsState()
+    val editor by viewModel.editorState.collectAsState()
+
+    wp?.let { item ->
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .verticalScroll(rememberScrollState())
+        ) {
+            // Header with Undo / Redo
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(16.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                IconButton(onClick = { viewModel.navigateBack() }) {
+                    Icon(imageVector = Icons.Default.ArrowBack, contentDescription = "Return back")
+                }
+                Text("PRO ADJUSTMENT ENGINE", fontWeight = FontWeight.Black, fontSize = 14.sp)
+                Row {
+                    IconButton(onClick = { viewModel.undo() }) {
+                        Icon(imageVector = Icons.AutoMirrored.Filled.Undo, contentDescription = "Undo adjustment layer")
+                    }
+                    IconButton(onClick = { viewModel.redo() }) {
+                        Icon(imageVector = Icons.AutoMirrored.Filled.Redo, contentDescription = "Redo adjustment layer")
+                    }
+                }
+            }
+
+            // Real-time Canvas Renderer
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(300.dp)
+                    .padding(horizontal = 24.dp)
+                    .clip(RoundedCornerShape(24.dp))
+                    .testTag("editor_render_canvas")
+            ) {
+                // Compile combined Matrix
+                val compiledMatrix = remember(editor) { compileColorFiltersMatrix(editor) }
+
+                AsyncImage(
+                    model = item.url,
+                    contentDescription = null,
+                    contentScale = ContentScale.Crop,
+                    colorFilter = ColorFilter.colorMatrix(compiledMatrix),
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .blur((if (editor.blurRadius > 0f) editor.blurRadius else 0f).dp)
+                        .graphicsLayer {
+                            alpha = 1f
+                            clip = true
+                        }
+                )
+
+                // Neon Glow overlay simulator
+                if (editor.neonGlow) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .background(
+                                Brush.radialGradient(
+                                    colors = listOf(
+                                        Color(0x3F00E5FF),
+                                        Color.Transparent
+                                    )
+                                )
+                            )
+                    )
+                }
+
+                // Grain / Noise simulation overlay
+                if (editor.grain > 0f) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .drawWithContent {
+                                drawContent()
+                                // Draw pixel dot spray
+                                for (p in 0..120) {
+                                    val rX = (0..size.width.toInt()).random().toFloat()
+                                    val rY = (0..size.height.toInt()).random().toFloat()
+                                    drawCircle(
+                                        color = Color.White.copy(alpha = editor.grain * 0.4f),
+                                        radius = 1.5.dp.toPx(),
+                                        center = Offset(rX, rY)
+                                    )
+                                }
+                            }
+                    )
+                }
+
+                // Vignette simulation overlay
+                if (editor.vignette > 0f) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .background(
+                                Brush.radialGradient(
+                                    colors = listOf(
+                                        Color.Transparent,
+                                        Color.Black.copy(alpha = editor.vignette)
+                                    )
+                                )
+                            )
+                    )
+                }
+
+                // Glass Blur overlay on dynamic rendering title
+                if (editor.glassBlur) {
+                    Box(
+                        modifier = Modifier
+                            .align(Alignment.Center)
+                            .glassmorphic(cornerRadius = 16.dp)
+                            .padding(horizontal = 16.dp, vertical = 8.dp)
+                    ) {
+                        Text("GLASS OVERLAY ACTIVE", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(24.dp))
+
+            // Adjustments Panel
+            Card(
+                shape = RoundedCornerShape(topStart = 32.dp, topEnd = 32.dp),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(modifier = Modifier.padding(24.dp)) {
+                    Text("Aesthetic Controls", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                    Spacer(modifier = Modifier.height(16.dp))
+
+                    // Blur slider
+                    SliderControl(
+                        label = "Gaussian Soft Blur",
+                        value = editor.blurRadius,
+                        onValueChange = { scale ->
+                            viewModel.updateEditorState { it.copy(blurRadius = scale) }
+                        },
+                        valueRange = 0f..25f
+                    )
+
+                    // Brightness slider
+                    SliderControl(
+                        label = "OLED Brightness Offset",
+                        value = editor.brightness,
+                        onValueChange = { scale ->
+                            viewModel.updateEditorState { it.copy(brightness = scale) }
+                        },
+                        valueRange = -0.5f..0.5f
+                    )
+
+                    // Contrast Slider
+                    SliderControl(
+                        label = "Deep Contrast",
+                        value = editor.contrast,
+                        onValueChange = { scale ->
+                            viewModel.updateEditorState { it.copy(contrast = scale) }
+                        },
+                        valueRange = 0.5f..1.8f
+                    )
+
+                    // Saturation
+                    SliderControl(
+                        label = "Chromatic Saturation",
+                        value = editor.saturation,
+                        onValueChange = { scale ->
+                            viewModel.updateEditorState { it.copy(saturation = scale) }
+                        },
+                        valueRange = 0f..2f
+                    )
+
+                    // AMOLED Darkener
+                    SliderControl(
+                        label = "AMOLED Pixel Dimmer",
+                        value = editor.amoledDarkener,
+                        onValueChange = { scale ->
+                            viewModel.updateEditorState { it.copy(amoledDarkener = scale) }
+                        },
+                        valueRange = 0f..0.9f
+                    )
+
+                    // Vignette
+                    SliderControl(
+                        label = "Cinematic Vignette Focus",
+                        value = editor.vignette,
+                        onValueChange = { scale ->
+                            viewModel.updateEditorState { it.copy(vignette = scale) }
+                        },
+                        valueRange = 0f..1f
+                    )
+
+                    // Grain Noise
+                    SliderControl(
+                        label = "Vintage Grain Noise",
+                        value = editor.grain,
+                        onValueChange = { scale ->
+                            viewModel.updateEditorState { it.copy(grain = scale) }
+                        },
+                        valueRange = 0f..1f
+                    )
+
+                    Spacer(modifier = Modifier.height(18.dp))
+                    Text("Precompiled Style Filters", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        FilterButton(
+                            text = "Vintage Hues",
+                            active = editor.vintageFilter,
+                            onClick = {
+                                viewModel.updateEditorState { it.copy(vintageFilter = !editor.vintageFilter, cyberpunkFilter = false) }
+                            }
+                        )
+                        FilterButton(
+                            text = "Acid Cyberpunk",
+                            active = editor.cyberpunkFilter,
+                            onClick = {
+                                viewModel.updateEditorState { it.copy(cyberpunkFilter = !editor.cyberpunkFilter, vintageFilter = false) }
+                            }
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.height(16.dp))
+                    Text("Aesthetic Overlays", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        FilterButton(
+                            text = "Glass Frosting",
+                            active = editor.glassBlur,
+                            onClick = { viewModel.updateEditorState { it.copy(glassBlur = !editor.glassBlur) } }
+                        )
+                        FilterButton(
+                            text = "Neon Glow Flare",
+                            active = editor.neonGlow,
+                            onClick = { viewModel.updateEditorState { it.copy(neonGlow = !editor.neonGlow) } }
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.height(24.dp))
+
+                    Button(
+                        onClick = {
+                            viewModel.navigateTo(Screen.APPLY_PREVIEW)
+                        },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(54.dp)
+                            .testTag("apply_custom_canvas_action"),
+                        shape = RoundedCornerShape(16.dp)
+                    ) {
+                        Text("Export to Applying Preview")
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun SliderControl(
+    label: String,
+    value: Float,
+    onValueChange: (Float) -> Unit,
+    valueRange: ClosedFloatingPointRange<Float>
+) {
+    Column(modifier = Modifier.padding(vertical = 4.dp)) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Text(label, style = MaterialTheme.typography.bodySmall)
+            Text(String.format("%.2f", value), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
+        }
+        Slider(
+            value = value,
+            onValueChange = onValueChange,
+            valueRange = valueRange,
+            modifier = Modifier.height(32.dp)
+        )
+    }
+}
+
+@Composable
+fun FilterButton(text: String, active: Boolean, onClick: () -> Unit) {
+    OutlinedButton(
+        onClick = onClick,
+        colors = ButtonDefaults.outlinedButtonColors(
+            containerColor = if (active) MaterialTheme.colorScheme.primary.copy(alpha = 0.12f) else Color.Transparent
+        ),
+        border = BorderStroke(1.dp, if (active) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline),
+        shape = RoundedCornerShape(12.dp)
+    ) {
+        Text(text, fontSize = 11.sp)
+    }
+}
+
+// ==================== APPLY PREVIEW SCREEN ====================
+@Composable
+fun ApplyPreviewScreen(viewModel: EcosystemViewModel) {
+    val wp by viewModel.selectedWallpaper.collectAsState()
+    val editor by viewModel.editorState.collectAsState()
+    val context = LocalContext.current
+
+    wp?.let { item ->
+        Box(modifier = Modifier.fillMaxSize()) {
+            val compiledMatrix = remember(editor) { compileColorFiltersMatrix(editor) }
+
+            // Fullscreen Dynamic Preview
+            AsyncImage(
+                model = item.url,
+                contentDescription = null,
+                contentScale = ContentScale.Crop,
+                colorFilter = ColorFilter.colorMatrix(compiledMatrix),
+                modifier = Modifier
+                    .fillMaxSize()
+                    .blur((if (editor.blurRadius > 0f) editor.blurRadius else 0f).dp)
+            )
+
+            // Neon glows or overlays
+            if (editor.neonGlow) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(
+                            Brush.radialGradient(
+                                colors = listOf(Color(0x3F00E5FF), Color.Transparent)
+                            )
+                        )
+                )
+            }
+
+            // Top action bar
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .align(Alignment.TopCenter)
+                    .statusBarsPadding()
+                    .padding(16.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                IconButton(
+                    onClick = { viewModel.navigateBack() },
+                    modifier = Modifier.background(Color.Black.copy(alpha = 0.5f), CircleShape)
+                ) {
+                    Icon(imageVector = Icons.Default.ArrowBack, contentDescription = "Exit preview", tint = Color.White)
+                }
+                Box(
+                    modifier = Modifier
+                        .background(Color.Black.copy(alpha = 0.5f), RoundedCornerShape(16.dp))
+                        .padding(horizontal = 14.dp, vertical = 6.dp)
+                ) {
+                    Text("ACTIVE CANVAS PREVIEW", color = Color.White, style = MaterialTheme.typography.labelSmall)
+                }
+                Spacer(modifier = Modifier.width(48.dp)) // Equalizer space
+            }
+
+            // Bottom application drawer
+            Card(
+                shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp),
+                colors = CardDefaults.cardColors(containerColor = Color.Black.copy(alpha = 0.75f)),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .align(Alignment.BottomCenter)
+                    .navigationBarsPadding()
+                    .padding(16.dp)
+            ) {
+                Column(
+                    modifier = Modifier.padding(20.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Text("Apply Layout", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                    Spacer(modifier = Modifier.height(16.dp))
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Button(
+                            onClick = {
+                                Toast.makeText(context, "Successfully set modified canvas \"${item.title}\" to Home Screen!", Toast.LENGTH_LONG).show()
+                                viewModel.downloadActiveWallpaper() // Sandbox add
+                                viewModel.navigateTo(Screen.HOME)
+                            },
+                            modifier = Modifier.weight(1f),
+                            shape = RoundedCornerShape(12.dp)
+                        ) {
+                            Text("Home Screen", fontSize = 12.sp)
+                        }
+                        Button(
+                            onClick = {
+                                Toast.makeText(context, "Successfully set modified canvas \"${item.title}\" to Lock Screen!", Toast.LENGTH_LONG).show()
+                                viewModel.downloadActiveWallpaper()
+                                viewModel.navigateTo(Screen.HOME)
+                            },
+                            modifier = Modifier.weight(1f),
+                            shape = RoundedCornerShape(12.dp)
+                        ) {
+                            Text("Lock Screen", fontSize = 12.sp)
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    Button(
+                        onClick = {
+                            Toast.makeText(context, "Successfully set modified canvas \"${item.title}\" to Both Screens!", Toast.LENGTH_LONG).show()
+                            viewModel.downloadActiveWallpaper()
+                            viewModel.navigateTo(Screen.HOME)
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(12.dp)
+                    ) {
+                        Text("Both Screens")
+                    }
+                }
+            }
+        }
+    }
+}

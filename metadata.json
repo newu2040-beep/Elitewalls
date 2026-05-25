@@ -1,0 +1,6 @@
+{
+  "name": "Elitewalls",
+  "description": "Premium Material 3 wallpaper and sound effects ecosystem with built-in customization editor and social creator features.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
