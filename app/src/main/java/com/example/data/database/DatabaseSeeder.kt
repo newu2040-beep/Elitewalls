@@ -208,7 +208,7 @@ object DatabaseSeeder {
                 durationText = "0:30",
                 durationMs = 30000L,
                 artist = "DJ Rahul",
-                soundUrl = "ringtone_synth"
+                soundUrl = "https://actions.google.com/sounds/v1/alarms/mechanical_clock_ring.ogg"
             ),
             SoundItem(
                 id = "sn_ringtone_minimal",
@@ -217,7 +217,7 @@ object DatabaseSeeder {
                 durationText = "0:25",
                 durationMs = 25000L,
                 artist = "Sato Breeze",
-                soundUrl = "ringtone_harp"
+                soundUrl = "https://actions.google.com/sounds/v1/cartoon/quick_twinkle.ogg"
             ),
             SoundItem(
                 id = "sn_meme_bruh",
@@ -226,7 +226,7 @@ object DatabaseSeeder {
                 durationText = "0:02",
                 durationMs = 2000L,
                 artist = "Internet Legend",
-                soundUrl = "meme_bruh"
+                soundUrl = "https://actions.google.com/sounds/v1/cartoon/slide_whistle_to_drum_pop.ogg"
             ),
             SoundItem(
                 id = "sn_meme_emotional",
@@ -235,7 +235,7 @@ object DatabaseSeeder {
                 durationText = "0:12",
                 durationMs = 12000L,
                 artist = "Meme Orchestra",
-                soundUrl = "meme_violin"
+                soundUrl = "https://actions.google.com/sounds/v1/music/sad_trombone.ogg"
             ),
             SoundItem(
                 id = "sn_effect_glitch",
@@ -244,7 +244,7 @@ object DatabaseSeeder {
                 durationText = "0:05",
                 durationMs = 5000L,
                 artist = "Nox Lab",
-                soundUrl = "effect_glitch"
+                soundUrl = "https://actions.google.com/sounds/v1/science_fiction/teleport.ogg"
             ),
             SoundItem(
                 id = "sn_ambient_ocean",
@@ -253,7 +253,7 @@ object DatabaseSeeder {
                 durationText = "5:00",
                 durationMs = 300000L,
                 artist = "Marina Zen",
-                soundUrl = "ambient_ocean"
+                soundUrl = "https://actions.google.com/sounds/v1/ambient/ocean_waves.ogg"
             ),
             SoundItem(
                 id = "sn_ambient_stars",
@@ -262,7 +262,7 @@ object DatabaseSeeder {
                 durationText = "4:30",
                 durationMs = 270000L,
                 artist = "Space Breath",
-                soundUrl = "ambient_stars"
+                soundUrl = "https://actions.google.com/sounds/v1/science_fiction/alien_hum_continuous.ogg"
             )
         )
     }

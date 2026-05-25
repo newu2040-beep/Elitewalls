@@ -4,6 +4,14 @@ import android.app.WallpaperManager
 import android.content.Context
 import android.graphics.Bitmap
 import android.widget.Toast
+import android.net.Uri
+import android.widget.VideoView
+import android.os.Build
+import androidx.compose.ui.viewinterop.AndroidView
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import java.io.File
+import java.io.FileOutputStream
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.*
@@ -120,6 +128,75 @@ fun compileColorFiltersMatrix(settings: EditorSettings): ColorMatrix {
     finalMatrix.set(matrix)
     finalMatrix.timesAssign(ColorMatrix(customMatrix))
     return finalMatrix
+}
+
+fun applyFiltersToBitmap(bitmap: Bitmap, settings: EditorSettings): Bitmap {
+    val width = bitmap.width
+    val height = bitmap.height
+    val filteredBitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+    val canvas = android.graphics.Canvas(filteredBitmap)
+    val paint = android.graphics.Paint()
+
+    val matrix = android.graphics.ColorMatrix()
+    matrix.setSaturation(settings.saturation)
+
+    val b = settings.brightness * 255f
+    val c = settings.contrast
+    val darkenerFactor = 1f - settings.amoledDarkener
+
+    var rTint = 1f
+    var gTint = 1f
+    var bTint = 1f
+
+    if (settings.cyberpunkFilter) {
+        rTint = 1.3f
+        gTint = 0.5f
+        bTint = 1.4f
+    } else if (settings.vintageFilter) {
+        rTint = 1.2f
+        gTint = 1.0f
+        bTint = 0.8f
+    }
+
+    settings.colorFilterTint?.let { color ->
+        rTint *= color.red
+        gTint *= color.green
+        bTint *= color.blue
+    }
+
+    val customMatrix = floatArrayOf(
+        c * rTint * darkenerFactor, 0f, 0f, 0f, b,
+        0f, c * gTint * darkenerFactor, 0f, 0f, b,
+        0f, 0f, c * bTint * darkenerFactor, 0f, b,
+        0f, 0f, 0f, 1f, 0f
+    )
+
+    val finalMatrix = android.graphics.ColorMatrix()
+    finalMatrix.set(matrix)
+    finalMatrix.postConcat(android.graphics.ColorMatrix(customMatrix))
+
+    paint.colorFilter = android.graphics.ColorMatrixColorFilter(finalMatrix)
+    canvas.drawBitmap(bitmap, 0f, 0f, paint)
+
+    return filteredBitmap
+}
+
+fun copyUriToInternalStorage(context: Context, uri: Uri): String? {
+    return try {
+        val inputStream = context.contentResolver.openInputStream(uri) ?: return null
+        val fileName = "upload_${System.currentTimeMillis()}.jpg"
+        val file = File(context.filesDir, fileName)
+        val outputStream = FileOutputStream(file)
+        inputStream.use { input ->
+            outputStream.use { output ->
+                input.copyTo(output)
+            }
+        }
+        file.absolutePath
+    } catch (e: Exception) {
+        e.printStackTrace()
+        null
+    }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -1090,6 +1167,7 @@ fun LiveWallpapersScreen(viewModel: EcosystemViewModel, liveWps: List<WallpaperI
             modifier = Modifier.weight(1f)
         ) {
             items(liveWps) { wp ->
+                val isPlaying = playingId == wp.id
                 Box(
                     modifier = Modifier
                         .height(280.dp)
@@ -1097,18 +1175,34 @@ fun LiveWallpapersScreen(viewModel: EcosystemViewModel, liveWps: List<WallpaperI
                         .clickable { viewModel.showWallpaperDetail(wp) }
                         .testTag("live_canvas_wp_${wp.id}")
                 ) {
-                    AsyncImage(
-                        model = wp.url,
-                        contentDescription = wp.title,
-                        contentScale = ContentScale.Crop,
-                        modifier = Modifier.fillMaxSize()
-                    )
+                    if (isPlaying && wp.isLive && wp.videoUrl != null) {
+                        AndroidView(
+                            factory = { ctx ->
+                                VideoView(ctx).apply {
+                                    setVideoURI(Uri.parse(wp.videoUrl))
+                                    setOnPreparedListener { mp ->
+                                        mp.isLooping = true
+                                        mp.setVolume(0f, 0f) // silent background wallpaper by default
+                                        start()
+                                    }
+                                }
+                            },
+                            modifier = Modifier.fillMaxSize()
+                        )
+                    } else {
+                        AsyncImage(
+                            model = wp.url,
+                            contentDescription = wp.title,
+                            contentScale = ContentScale.Crop,
+                            modifier = Modifier.fillMaxSize()
+                        )
+                    }
 
                     // Wave Play indicator
                     Box(
                         modifier = Modifier
                             .fillMaxSize()
-                            .background(if (playingId == wp.id) Color.Black.copy(alpha = 0.3f) else Color.Transparent)
+                            .background(if (playingId == wp.id) Color.Black.copy(alpha = 0.1f) else Color.Transparent)
                     )
 
                     IconButton(
@@ -1500,6 +1594,27 @@ fun UploadCenterScreen(viewModel: EcosystemViewModel) {
     var uploadUrl by remember { mutableStateOf("") }
     var uploadIsLive by remember { mutableStateOf(false) }
 
+    var selectedImageUri by remember { mutableStateOf<Uri?>(null) }
+    val galleryLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.GetContent()
+    ) { uri ->
+        selectedImageUri = uri
+        if (uri != null) {
+            uploadUrl = uri.toString()
+            try {
+                val inputStream = context.contentResolver.openInputStream(uri)
+                val options = android.graphics.BitmapFactory.Options().apply {
+                    inJustDecodeBounds = true
+                }
+                android.graphics.BitmapFactory.decodeStream(inputStream, null, options)
+                uploadWidth = options.outWidth.coerceAtLeast(1920).toString()
+                uploadHeight = options.outHeight.coerceAtLeast(1080).toString()
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }
+    }
+
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -1522,6 +1637,20 @@ fun UploadCenterScreen(viewModel: EcosystemViewModel) {
                     style = MaterialTheme.typography.bodySmall,
                     modifier = Modifier.padding(bottom = 16.dp)
                 )
+
+                // GALLERY PICKER TRIGGER BUTTON
+                Button(
+                    onClick = { galleryLauncher.launch("image/*") },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(bottom = 16.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.secondary),
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    Icon(imageVector = Icons.Default.PhotoLibrary, contentDescription = null)
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(if (selectedImageUri != null) "Selected: Custom Gallery Image" else "Pick Wallpaper from Gallery")
+                }
 
                 OutlinedTextField(
                     value = uploadTitle,
@@ -1546,7 +1675,7 @@ fun UploadCenterScreen(viewModel: EcosystemViewModel) {
                         Text(uploadCategory)
                     }
                     DropdownMenu(expanded = dropdownExpanded, onDismissRequest = { dropdownExpanded = false }) {
-                        val categories = listOf("Minimal", "Nature", "Anime", "Gaming", "Cars", "Abstract", "Cyberpunk", "Aesthetic", "Dark AMOLED", "Space", "Technology", "Photography")
+                        val categories = listOf("Minimal", "Nature", "Anime", "Gaming", "Cars", "Abstract", "Cyberpunk", "Aesthetic", "Dark AMOLED", "Space", "Technology", "Photography", "Liquid Vector", "Glassmorphic", "Cyber SciFi")
                         categories.forEach { cat ->
                             DropdownMenuItem(text = { Text(cat) }, onClick = {
                                 uploadCategory = cat
@@ -1585,8 +1714,8 @@ fun UploadCenterScreen(viewModel: EcosystemViewModel) {
                 OutlinedTextField(
                     value = uploadUrl,
                     onValueChange = { uploadUrl = it },
-                    label = { Text("Direct High-Res Image Link") },
-                    placeholder = { Text("E.g. Unsplash hotlink") },
+                    label = { Text("Direct Link (Alternative URL)") },
+                    placeholder = { Text("E.g. Unsplash or custom link") },
                     modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp)
                 )
 
@@ -1609,13 +1738,27 @@ fun UploadCenterScreen(viewModel: EcosystemViewModel) {
                             Toast.makeText(context, "Failure: Please define building artwork title", Toast.LENGTH_SHORT).show()
                             return@Button
                         }
+                        
+                        var finalPath = uploadUrl
+                        if (selectedImageUri != null) {
+                            val localCreated = copyUriToInternalStorage(context, selectedImageUri!!)
+                            if (localCreated != null) {
+                                finalPath = localCreated
+                            }
+                        }
+
+                        if (finalPath.isBlank()) {
+                            Toast.makeText(context, "Failure: Please select an image first", Toast.LENGTH_SHORT).show()
+                            return@Button
+                        }
+
                         val success = viewModel.analyzeAndValidateUpload(
                             title = uploadTitle,
                             category = uploadCategory,
                             width = widthVal,
                             height = heightVal,
                             tags = uploadTags,
-                            url = uploadUrl,
+                            url = finalPath,
                             isLive = uploadIsLive,
                             videoUrl = if (uploadIsLive) "https://assets.mixkit.co/videos/preview/mixkit-star-trails-glowing-in-the-night-sky-40292-large.mp4" else null
                         )
@@ -1623,6 +1766,7 @@ fun UploadCenterScreen(viewModel: EcosystemViewModel) {
                             // Reset inputs
                             uploadTitle = ""
                             uploadUrl = ""
+                            selectedImageUri = null
                             viewModel.navigateTo(Screen.HOME)
                         }
                     },
@@ -1836,7 +1980,7 @@ fun SettingsScreen(viewModel: EcosystemViewModel) {
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Column {
+                    Column(modifier = Modifier.weight(1f)) {
                         Text("Purge Image Sandbox Cache", fontWeight = FontWeight.Bold)
                         Text("Active usage: ${String.format("%.1f", cacheVal)} MB storage consumed", style = MaterialTheme.typography.bodySmall)
                     }
@@ -1847,6 +1991,28 @@ fun SettingsScreen(viewModel: EcosystemViewModel) {
                         colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
                     ) {
                         Text("Dry-Purge")
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(18.dp))
+                Divider(color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f))
+                Spacer(modifier = Modifier.height(18.dp))
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("Fresh Start: Purge Demo Data", fontWeight = FontWeight.Bold)
+                        Text("Deletes all preloaded mock/seeded elements so you have a clean slate to manually add custom wallpapers.", style = MaterialTheme.typography.bodySmall)
+                    }
+                    Button(
+                        onClick = { viewModel.purgeDemoData() },
+                        shape = RoundedCornerShape(12.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
+                    ) {
+                        Text("Purge Demo")
                     }
                 }
             }
@@ -1983,15 +2149,31 @@ fun DetailScreen(viewModel: EcosystemViewModel) {
                     .clip(RoundedCornerShape(24.dp))
                     .testTag("detail_hero_canvas")
             ) {
-                AsyncImage(
-                    model = ImageRequest.Builder(LocalContext.current)
-                        .data(item.url)
-                        .crossfade(true)
-                        .build(),
-                    contentDescription = item.title,
-                    contentScale = ContentScale.Crop,
-                    modifier = Modifier.fillMaxSize()
-                )
+                if (item.isLive && item.videoUrl != null) {
+                    AndroidView(
+                        factory = { ctx ->
+                            VideoView(ctx).apply {
+                                setVideoURI(Uri.parse(item.videoUrl))
+                                setOnPreparedListener { mp ->
+                                    mp.isLooping = true
+                                    mp.setVolume(0f, 0f) // Silent preview
+                                    start()
+                                }
+                            }
+                        },
+                        modifier = Modifier.fillMaxSize()
+                    )
+                } else {
+                    AsyncImage(
+                        model = ImageRequest.Builder(LocalContext.current)
+                            .data(item.url)
+                            .crossfade(true)
+                            .build(),
+                        contentDescription = item.title,
+                        contentScale = ContentScale.Crop,
+                        modifier = Modifier.fillMaxSize()
+                    )
+                }
 
                 // Translucent Actions Overlay
                 Box(
@@ -2062,6 +2244,22 @@ fun DetailScreen(viewModel: EcosystemViewModel) {
                     Spacer(modifier = Modifier.width(8.dp))
                     Text("Tweak Editor")
                 }
+            }
+
+            Spacer(modifier = Modifier.height(10.dp))
+
+            Button(
+                onClick = { viewModel.deleteWallpaperItem(item) },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(52.dp)
+                    .testTag("delete_artwork_action"),
+                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error),
+                shape = RoundedCornerShape(16.dp)
+            ) {
+                Icon(imageVector = Icons.Default.Delete, contentDescription = null, modifier = Modifier.size(18.dp))
+                Spacer(modifier = Modifier.width(8.dp))
+                Text("Delete Artwork from Database")
             }
 
             Spacer(modifier = Modifier.height(16.dp))
@@ -2445,6 +2643,8 @@ fun ApplyPreviewScreen(viewModel: EcosystemViewModel) {
     val wp by viewModel.selectedWallpaper.collectAsState()
     val editor by viewModel.editorState.collectAsState()
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    var applyingInProgress by remember { mutableStateOf(false) }
 
     wp?.let { item ->
         Box(modifier = Modifier.fillMaxSize()) {
@@ -2500,6 +2700,50 @@ fun ApplyPreviewScreen(viewModel: EcosystemViewModel) {
                 Spacer(modifier = Modifier.width(48.dp)) // Equalizer space
             }
 
+            // Centralized Apply Trigger helper
+            val setWallpaperRealTime: (String) -> Unit = { target ->
+                scope.launch {
+                    applyingInProgress = true
+                    try {
+                        val imageLoader = coil.Coil.imageLoader(context)
+                        val request = coil.request.ImageRequest.Builder(context)
+                            .data(item.url)
+                            .allowHardware(false) // software bitmap for filters representation
+                            .build()
+                        val result = imageLoader.execute(request)
+                        if (result is coil.request.SuccessResult) {
+                            val originalBitmap = (result.drawable as android.graphics.drawable.BitmapDrawable).bitmap
+                            val filteredBitmap = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
+                                applyFiltersToBitmap(originalBitmap, editor)
+                            }
+                            val wallpaperManager = WallpaperManager.getInstance(context)
+                            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                                    val flags = when (target) {
+                                        "home" -> WallpaperManager.FLAG_SYSTEM
+                                        "lock" -> WallpaperManager.FLAG_LOCK
+                                        else -> WallpaperManager.FLAG_SYSTEM or WallpaperManager.FLAG_LOCK
+                                    }
+                                    wallpaperManager.setBitmap(filteredBitmap, null, true, flags)
+                                } else {
+                                    wallpaperManager.setBitmap(filteredBitmap)
+                                }
+                            }
+                            Toast.makeText(context, "Successfully set wallpaper in real-time!", Toast.LENGTH_LONG).show()
+                            viewModel.downloadActiveWallpaper()
+                            viewModel.navigateTo(Screen.HOME)
+                        } else {
+                            Toast.makeText(context, "Could not digest source background canvas", Toast.LENGTH_SHORT).show()
+                        }
+                    } catch (e: Exception) {
+                        e.printStackTrace()
+                        Toast.makeText(context, "Apply error: ${e.localizedMessage}", Toast.LENGTH_LONG).show()
+                    } finally {
+                        applyingInProgress = false
+                    }
+                }
+            }
+
             // Bottom application drawer
             Card(
                 shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp),
@@ -2522,22 +2766,14 @@ fun ApplyPreviewScreen(viewModel: EcosystemViewModel) {
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
                         Button(
-                            onClick = {
-                                Toast.makeText(context, "Successfully set modified canvas \"${item.title}\" to Home Screen!", Toast.LENGTH_LONG).show()
-                                viewModel.downloadActiveWallpaper() // Sandbox add
-                                viewModel.navigateTo(Screen.HOME)
-                            },
+                            onClick = { setWallpaperRealTime("home") },
                             modifier = Modifier.weight(1f),
                             shape = RoundedCornerShape(12.dp)
                         ) {
                             Text("Home Screen", fontSize = 12.sp)
                         }
                         Button(
-                            onClick = {
-                                Toast.makeText(context, "Successfully set modified canvas \"${item.title}\" to Lock Screen!", Toast.LENGTH_LONG).show()
-                                viewModel.downloadActiveWallpaper()
-                                viewModel.navigateTo(Screen.HOME)
-                            },
+                            onClick = { setWallpaperRealTime("lock") },
                             modifier = Modifier.weight(1f),
                             shape = RoundedCornerShape(12.dp)
                         ) {
@@ -2548,15 +2784,37 @@ fun ApplyPreviewScreen(viewModel: EcosystemViewModel) {
                     Spacer(modifier = Modifier.height(8.dp))
 
                     Button(
-                        onClick = {
-                            Toast.makeText(context, "Successfully set modified canvas \"${item.title}\" to Both Screens!", Toast.LENGTH_LONG).show()
-                            viewModel.downloadActiveWallpaper()
-                            viewModel.navigateTo(Screen.HOME)
-                        },
+                        onClick = { setWallpaperRealTime("both") },
                         modifier = Modifier.fillMaxWidth(),
                         shape = RoundedCornerShape(12.dp)
                     ) {
                         Text("Both Screens")
+                    }
+                }
+            }
+
+            // Processing Loader Overlay
+            if (applyingInProgress) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(Color.Black.copy(alpha = 0.6f)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        CircularProgressIndicator(color = MaterialTheme.colorScheme.primary)
+                        Spacer(modifier = Modifier.height(16.dp))
+                        Text(
+                            text = "Applying High-Fidelity Canvas...",
+                            color = Color.White,
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Text(
+                            text = "Matching dynamic colors in real-time on device",
+                            color = Color.White.copy(alpha = 0.7f),
+                            style = MaterialTheme.typography.bodySmall
+                        )
                     }
                 }
             }

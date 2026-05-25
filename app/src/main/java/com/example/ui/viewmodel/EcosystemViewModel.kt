@@ -257,11 +257,26 @@ class EcosystemViewModel(application: Application) : AndroidViewModel(applicatio
     private fun simulateAudioPlayback(sound: SoundItem) {
         stopAudio()
         try {
-            // Because local resources or arbitrary urls might not exist, we simulate audio playback
-            // visually in the UI and with a small toast trigger or a simple system beep
-            Toast.makeText(getApplication(), "Playing: ${sound.title} by ${sound.artist}", Toast.LENGTH_SHORT).show()
+            val url = sound.soundUrl
+            if (url.startsWith("http://") || url.startsWith("https://")) {
+                mediaPlayer = MediaPlayer().apply {
+                    setDataSource(url)
+                    setOnPreparedListener { 
+                        start() 
+                    }
+                    setOnCompletionListener {
+                        playActiveSoundId.value = null
+                    }
+                    prepareAsync()
+                }
+                Toast.makeText(getApplication(), "Buffering stream: ${sound.title}...", Toast.LENGTH_SHORT).show()
+            } else {
+                // local asset or sound simulation fallback
+                Toast.makeText(getApplication(), "Playing: ${sound.title} (Simulated audio track)", Toast.LENGTH_SHORT).show()
+            }
         } catch (e: Exception) {
             e.printStackTrace()
+            Toast.makeText(getApplication(), "Failed to play audio preview offline: ${e.localizedMessage}", Toast.LENGTH_SHORT).show()
         }
     }
 
@@ -269,6 +284,32 @@ class EcosystemViewModel(application: Application) : AndroidViewModel(applicatio
         playActiveSoundId.value = null
         mediaPlayer?.release()
         mediaPlayer = null
+    }
+
+    fun deleteWallpaperItem(item: WallpaperItem) {
+        viewModelScope.launch {
+            db.wallpaperDao().deleteWallpaper(item)
+            Toast.makeText(getApplication(), "Successfully deleted wallpaper \"${item.title}\"!", Toast.LENGTH_SHORT).show()
+            selectedWallpaper.value = null
+            navigateTo(Screen.HOME)
+        }
+    }
+
+    fun purgeDemoData() {
+        viewModelScope.launch {
+            val dao = db.wallpaperDao()
+            val wps = allWallpapers.value
+            var purgedCount = 0
+            for (wp in wps) {
+                if (wp.id.startsWith("wp_")) {
+                    dao.deleteWallpaper(wp)
+                    purgedCount++
+                }
+            }
+            Toast.makeText(getApplication(), "Purged $purgedCount pre-installed demo items. Starting with fresh manually added content!", Toast.LENGTH_LONG).show()
+            selectedWallpaper.value = null
+            navigateTo(Screen.HOME)
+        }
     }
 
     override fun onCleared() {
