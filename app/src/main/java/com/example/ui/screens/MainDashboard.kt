@@ -5,7 +5,6 @@ import android.content.Context
 import android.graphics.Bitmap
 import android.widget.Toast
 import android.net.Uri
-import android.widget.VideoView
 import android.os.Build
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -67,6 +66,46 @@ import com.example.ui.viewmodel.Screen
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+
+import androidx.media3.common.MediaItem
+import androidx.media3.common.Player
+import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.ui.PlayerView
+import androidx.compose.runtime.DisposableEffect
+
+@Composable
+fun LiveVideoPlayer(uri: String, modifier: Modifier = Modifier, isSilent: Boolean = true) {
+    val context = LocalContext.current
+    val exoPlayer = remember {
+        ExoPlayer.Builder(context).build().apply {
+            setMediaItem(MediaItem.fromUri(Uri.parse(uri)))
+            repeatMode = Player.REPEAT_MODE_ALL
+            if (isSilent) volume = 0f
+            prepare()
+            playWhenReady = true
+        }
+    }
+
+    DisposableEffect(exoPlayer) {
+        onDispose {
+            exoPlayer.release()
+        }
+    }
+
+    AndroidView(
+        factory = { ctx ->
+            PlayerView(ctx).apply {
+                player = exoPlayer
+                useController = false
+                layoutParams = android.view.ViewGroup.LayoutParams(
+                    android.view.ViewGroup.LayoutParams.MATCH_PARENT,
+                    android.view.ViewGroup.LayoutParams.MATCH_PARENT
+                )
+            }
+        },
+        modifier = modifier
+    )
+}
 
 // --- Glassmorphic Glass Modifier ---
 @Composable
@@ -232,7 +271,6 @@ fun MainDashboard(viewModel: EcosystemViewModel) {
         Triple("Favorites", Screen.FAVORITES, Icons.Default.Favorite),
         Triple("Downloads", Screen.DOWNLOADS, Icons.Default.Download),
         Triple("Upload Center", Screen.UPLOAD_CENTER, Icons.Default.CloudUpload),
-        Triple("Creator Dashboard", Screen.CREATOR_DASHBOARD, Icons.Default.Dashboard),
         Triple("Settings", Screen.SETTINGS, Icons.Default.Settings),
         Triple("About", Screen.ABOUT, Icons.Default.Info)
     )
@@ -354,7 +392,6 @@ fun MainDashboard(viewModel: EcosystemViewModel) {
                                     Screen.FAVORITES -> "Private Vault"
                                     Screen.DOWNLOADS -> "Local Gallery"
                                     Screen.UPLOAD_CENTER -> "Upload Studio"
-                                    Screen.CREATOR_DASHBOARD -> "Creator Hub"
                                     Screen.SETTINGS -> "Dashboard Settings"
                                     Screen.ABOUT -> "Project Elitewalls"
                                     Screen.DETAIL -> "Aesthetic Canvas"
@@ -586,7 +623,6 @@ fun MainDashboard(viewModel: EcosystemViewModel) {
                         Screen.FAVORITES -> FavoritesScreen(viewModel, favoritesList, soundsList)
                         Screen.DOWNLOADS -> DownloadsScreen(viewModel, downloadsList)
                         Screen.UPLOAD_CENTER -> UploadCenterScreen(viewModel)
-                        Screen.CREATOR_DASHBOARD -> CreatorDashboardScreen(viewModel)
                         Screen.SETTINGS -> SettingsScreen(viewModel)
                         Screen.ABOUT -> AboutScreen()
                         Screen.DETAIL -> DetailScreen(viewModel)
@@ -1141,19 +1177,7 @@ fun LiveWallpapersScreen(viewModel: EcosystemViewModel, liveWps: List<WallpaperI
                         .testTag("live_canvas_wp_${wp.id}")
                 ) {
                     if (isPlaying && wp.isLive && wp.videoUrl != null) {
-                        AndroidView(
-                            factory = { ctx ->
-                                VideoView(ctx).apply {
-                                    setVideoURI(Uri.parse(wp.videoUrl))
-                                    setOnPreparedListener { mp ->
-                                        mp.isLooping = true
-                                        mp.setVolume(0f, 0f) // silent background wallpaper by default
-                                        start()
-                                    }
-                                }
-                            },
-                            modifier = Modifier.fillMaxSize()
-                        )
+                        LiveVideoPlayer(uri = wp.videoUrl, modifier = Modifier.fillMaxSize())
                     } else {
                         AsyncImage(
                             model = wp.url,
@@ -2231,19 +2255,7 @@ fun UploadCenterScreen(viewModel: EcosystemViewModel) {
                                             .background(Color.Black),
                                         contentAlignment = Alignment.Center
                                     ) {
-                                        AndroidView(
-                                            factory = { ctx ->
-                                                VideoView(ctx).apply {
-                                                    setVideoURI(selectedVideoUri)
-                                                    setOnPreparedListener { mp ->
-                                                        mp.isLooping = true
-                                                        mp.setVolume(0f, 0f) // Silent during selection preview
-                                                        start()
-                                                    }
-                                                }
-                                            },
-                                            modifier = Modifier.fillMaxSize()
-                                        )
+                                        LiveVideoPlayer(uri = selectedVideoUri.toString(), modifier = Modifier.fillMaxSize())
                                     }
                                     Spacer(modifier = Modifier.height(8.dp))
                                     Text("Raw File size: $videoSizeText", fontSize = 11.sp)
@@ -2599,288 +2611,6 @@ fun saveFileToPublicGallery(context: android.content.Context, sourcePath: String
     }
 }
 
-// ==================== CREATOR DASHBOARD ====================
-@Composable
-fun CreatorDashboardScreen(viewModel: EcosystemViewModel) {
-    val context = LocalContext.current
-    var spaceTab by remember { mutableStateOf(0) } // 0: Wallpapers, 1: Sound Ringtone clips
-    
-    val wallpapers by viewModel.allWallpapers.collectAsState()
-    val sounds by viewModel.allSounds.collectAsState()
-
-    var activeAudioPlaybackUri by remember { mutableStateOf<String?>(null) }
-    var activeMediaPlayer by remember { mutableStateOf<android.media.MediaPlayer?>(null) }
-    var isAudioTrackPlaying by remember { mutableStateOf(false) }
-
-    DisposableEffect(spaceTab) {
-        onDispose {
-            activeMediaPlayer?.stop()
-            activeMediaPlayer?.release()
-            activeMediaPlayer = null
-            isAudioTrackPlaying = false
-            activeAudioPlaybackUri = null
-        }
-    }
-
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(16.dp)
-    ) {
-        // Profile Summary Header Panel (Professional Branding)
-        Card(
-            shape = RoundedCornerShape(24.dp),
-            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.35f)),
-            modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp)
-        ) {
-            Column(modifier = Modifier.padding(16.dp)) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Box(modifier = Modifier.size(60.dp).clip(CircleShape).background(MaterialTheme.colorScheme.primary)) {
-                        AsyncImage(
-                            model = "https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&q=80&w=120", 
-                            contentDescription = "Avatar Profile",
-                            contentScale = ContentScale.Crop,
-                            modifier = Modifier.fillMaxSize()
-                        )
-                    }
-                    Spacer(modifier = Modifier.width(16.dp))
-                    Column {
-                        Text("Rahul Shah", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Black)
-                        Text("Aesthetic Creator Hub Sandbox", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
-                        Text("Level: Gold Prime Verified", fontSize = 11.sp, color = MaterialTheme.colorScheme.secondary, fontWeight = FontWeight.Bold)
-                    }
-                }
-            }
-        }
-
-        Text(
-            text = "Sandbox Content Manager",
-            style = MaterialTheme.typography.titleMedium,
-            fontWeight = FontWeight.Black,
-            modifier = Modifier.padding(bottom = 12.dp)
-        )
-
-        // Custom filter selector
-        TabRow(selectedTabIndex = spaceTab, modifier = Modifier.padding(bottom = 12.dp), containerColor = Color.Transparent) {
-            Tab(selected = spaceTab == 0, onClick = { spaceTab = 0 }) {
-                Text("My Canvas Artwork (${wallpapers.size})", modifier = Modifier.padding(12.dp), style = MaterialTheme.typography.labelMedium)
-            }
-            Tab(selected = spaceTab == 1, onClick = { spaceTab = 1 }) {
-                Text("My Ringtones (${sounds.size})", modifier = Modifier.padding(12.dp), style = MaterialTheme.typography.labelMedium)
-            }
-        }
-
-        if (spaceTab == 0) {
-            if (wallpapers.isEmpty()) {
-                Box(modifier = Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Icon(imageVector = Icons.Default.CloudQueue, contentDescription = null, modifier = Modifier.size(48.dp), tint = MaterialTheme.colorScheme.primary)
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Text("Your Canvas Sandbox is currently empty.", fontWeight = FontWeight.Bold)
-                        Text("Go to 'Upload' tab to publish your first artwork!", fontSize = 12.sp, color = Color.Gray)
-                    }
-                }
-            } else {
-                LazyColumn(
-                    verticalArrangement = Arrangement.spacedBy(12.dp),
-                    modifier = Modifier.weight(1f)
-                ) {
-                    items(wallpapers) { item ->
-                        Card(
-                            modifier = Modifier.fillMaxWidth(),
-                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)),
-                            shape = RoundedCornerShape(16.dp)
-                        ) {
-                            Row(modifier = Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
-                                // Thumbnail
-                                Box(
-                                    modifier = Modifier
-                                        .size(72.dp)
-                                        .clip(RoundedCornerShape(8.dp))
-                                        .background(Color.Black)
-                                ) {
-                                    AsyncImage(
-                                        model = item.url,
-                                        contentDescription = item.title,
-                                        contentScale = ContentScale.Crop,
-                                        modifier = Modifier.fillMaxSize()
-                                    )
-                                    if (item.isLive) {
-                                        Box(
-                                            modifier = Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.25f)),
-                                            contentAlignment = Alignment.BottomStart
-                                        ) {
-                                            Row(
-                                                modifier = Modifier.padding(4.dp).background(Color.Black.copy(alpha = 0.6f), RoundedCornerShape(4.dp)).padding(horizontal = 4.dp, vertical = 2.dp),
-                                                verticalAlignment = Alignment.CenterVertically
-                                            ) {
-                                                Icon(imageVector = Icons.Default.PlayCircle, contentDescription = null, tint = Color.White, modifier = Modifier.size(10.dp))
-                                                Spacer(modifier = Modifier.width(2.dp))
-                                                Text("LIVE", color = Color.White, fontSize = 7.sp, fontWeight = FontWeight.Bold)
-                                            }
-                                        }
-                                    }
-                                }
-                                
-                                Spacer(modifier = Modifier.width(16.dp))
-                                
-                                Column(modifier = Modifier.weight(1f)) {
-                                    Text(item.title, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.bodyMedium)
-                                    Text("Resolution: ${item.width}x${item.height}", fontSize = 11.sp)
-                                    Text("Category: ${item.category}", fontSize = 11.sp, color = MaterialTheme.colorScheme.primary)
-                                    val isFileLocal = item.url.startsWith("/") || (item.videoUrl?.startsWith("/") == true)
-                                    if (isFileLocal) {
-                                        Text("Local storage synced", fontSize = 10.sp, color = Color(0xFF4CAF50), fontWeight = FontWeight.Bold)
-                                    }
-                                }
-
-                                Row {
-                                    // Social share button
-                                    IconButton(
-                                        onClick = {
-                                            shareLocalFile(
-                                                context = context,
-                                                filePath = if (item.isLive) (item.videoUrl ?: item.url) else item.url,
-                                                title = item.title,
-                                                isVideo = item.isLive
-                                            )
-                                        }
-                                    ) {
-                                        Icon(imageVector = Icons.Default.Share, contentDescription = "Share", tint = MaterialTheme.colorScheme.primary)
-                                    }
-
-                                    // Remove artwork button
-                                    IconButton(
-                                        onClick = {
-                                            try {
-                                                val localPath = if (item.isLive) item.videoUrl else item.url
-                                                if (localPath != null && localPath.startsWith("/")) {
-                                                    val localF = java.io.File(localPath)
-                                                    if (localF.exists()) localF.delete()
-                                                }
-                                            } catch (e: Exception) { e.printStackTrace() }
-                                            viewModel.deleteWallpaperItem(item)
-                                        }
-                                    ) {
-                                        Icon(imageVector = Icons.Default.Delete, contentDescription = "Delete", tint = Color(0xFFE53935))
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        } else {
-            if (sounds.isEmpty()) {
-                Box(modifier = Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Icon(imageVector = Icons.Default.QueueMusic, contentDescription = null, modifier = Modifier.size(48.dp), tint = MaterialTheme.colorScheme.primary)
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Text("No custom sounds uploaded yet.", fontWeight = FontWeight.Bold)
-                        Text("Go to 'Upload' tab and upload your audio creation!", fontSize = 12.sp, color = Color.Gray)
-                    }
-                }
-            } else {
-                LazyColumn(
-                    verticalArrangement = Arrangement.spacedBy(12.dp),
-                    modifier = Modifier.weight(1f)
-                ) {
-                    items(sounds) { item ->
-                        Card(
-                            modifier = Modifier.fillMaxWidth(),
-                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)),
-                            shape = RoundedCornerShape(16.dp)
-                        ) {
-                            Row(modifier = Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
-                                // Inline Sound Playback icon controller
-                                val isCurrentPlaying = activeAudioPlaybackUri == item.soundUrl && isAudioTrackPlaying
-                                IconButton(
-                                    onClick = {
-                                        try {
-                                            if (isCurrentPlaying) {
-                                                activeMediaPlayer?.pause()
-                                                isAudioTrackPlaying = false
-                                            } else {
-                                                if (activeAudioPlaybackUri != item.soundUrl) {
-                                                    activeMediaPlayer?.stop()
-                                                    activeMediaPlayer?.release()
-                                                    activeMediaPlayer = android.media.MediaPlayer().apply {
-                                                        if (item.soundUrl.startsWith("/")) {
-                                                            setDataSource(item.soundUrl)
-                                                        } else {
-                                                            setDataSource(context, Uri.parse(item.soundUrl))
-                                                        }
-                                                        prepare()
-                                                        isLooping = true
-                                                        start()
-                                                    }
-                                                    activeAudioPlaybackUri = item.soundUrl
-                                                } else {
-                                                    activeMediaPlayer?.start()
-                                                }
-                                                isAudioTrackPlaying = true
-                                            }
-                                        } catch (e: Exception) {
-                                            e.printStackTrace()
-                                            Toast.makeText(context, "Cannot preview clip: ${e.localizedMessage}", Toast.LENGTH_SHORT).show()
-                                        }
-                                    },
-                                    modifier = Modifier.background(MaterialTheme.colorScheme.primaryContainer, CircleShape)
-                                ) {
-                                    Icon(
-                                        imageVector = if (isCurrentPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
-                                        contentDescription = "Preview sound inside sandbox manager",
-                                        tint = MaterialTheme.colorScheme.primary
-                                    )
-                                }
-
-                                Spacer(modifier = Modifier.width(16.dp))
-
-                                Column(modifier = Modifier.weight(1f)) {
-                                    Text(item.title, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.bodyMedium)
-                                    Text("Duration: ${item.durationText}", fontSize = 11.sp)
-                                    Text("Author: ${item.artist}", fontSize = 11.sp, color = MaterialTheme.colorScheme.secondary)
-                                }
-
-                                Row {
-                                    // Social share button
-                                    IconButton(
-                                        onClick = {
-                                            shareLocalFile(
-                                                context = context,
-                                                filePath = item.soundUrl,
-                                                title = item.title,
-                                                isAudio = true
-                                            )
-                                        }
-                                    ) {
-                                        Icon(imageVector = Icons.Default.Share, contentDescription = "Share clip", tint = MaterialTheme.colorScheme.primary)
-                                    }
-
-                                    // Remove sound button
-                                    IconButton(
-                                        onClick = {
-                                            try {
-                                                if (item.soundUrl.startsWith("/")) {
-                                                    val localF = java.io.File(item.soundUrl)
-                                                    if (localF.exists()) localF.delete()
-                                                }
-                                            } catch (e: Exception) { e.printStackTrace() }
-                                            viewModel.deleteSoundItem(item)
-                                        }
-                                    ) {
-                                        Icon(imageVector = Icons.Default.Delete, contentDescription = "Delete", tint = Color(0xFFE53935))
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-
 // ==================== SETTINGS SCREEN ====================
 @Composable
 fun SettingsScreen(viewModel: EcosystemViewModel) {
@@ -3124,19 +2854,7 @@ fun DetailScreen(viewModel: EcosystemViewModel) {
                     .testTag("detail_hero_canvas")
             ) {
                 if (item.isLive && item.videoUrl != null) {
-                    AndroidView(
-                        factory = { ctx ->
-                            VideoView(ctx).apply {
-                                setVideoURI(Uri.parse(item.videoUrl))
-                                setOnPreparedListener { mp ->
-                                    mp.isLooping = true
-                                    mp.setVolume(0f, 0f) // Silent preview
-                                    start()
-                                }
-                            }
-                        },
-                        modifier = Modifier.fillMaxSize()
-                    )
+                    LiveVideoPlayer(uri = item.videoUrl, modifier = Modifier.fillMaxSize())
                 } else {
                     AsyncImage(
                         model = ImageRequest.Builder(LocalContext.current)
@@ -3658,19 +3376,7 @@ fun ApplyPreviewScreen(viewModel: EcosystemViewModel) {
 
             // Fullscreen Dynamic Preview (Video player for Live Video or Static Image)
             if (item.isLive && item.videoUrl != null) {
-                AndroidView(
-                    factory = { ctx ->
-                        VideoView(ctx).apply {
-                            setVideoURI(Uri.parse(item.videoUrl))
-                            setOnPreparedListener { mp ->
-                                mp.isLooping = true
-                                mp.setVolume(0f, 0f) // Silent preview during setup
-                                start()
-                            }
-                        }
-                    },
-                    modifier = Modifier.fillMaxSize()
-                )
+                LiveVideoPlayer(uri = item.videoUrl, modifier = Modifier.fillMaxSize())
             } else {
                 AsyncImage(
                     model = item.url,

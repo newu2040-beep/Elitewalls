@@ -77,7 +77,6 @@ enum class Screen {
     FAVORITES,
     DOWNLOADS,
     UPLOAD_CENTER,
-    CREATOR_DASHBOARD,
     SETTINGS,
     ABOUT,
     DETAIL,

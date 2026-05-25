@@ -92,6 +92,8 @@ dependencies {
   implementation(libs.androidx.room.ktx)
   implementation(libs.androidx.room.runtime)
   implementation(libs.coil.compose)
+  implementation("androidx.media3:media3-exoplayer:1.2.1")
+  implementation("androidx.media3:media3-ui:1.2.1")
   implementation(libs.converter.moshi)
   // implementation(libs.firebase.ai)
   implementation(libs.kotlinx.coroutines.android)
